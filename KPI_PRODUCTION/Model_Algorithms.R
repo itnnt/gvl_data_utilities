@@ -48,6 +48,32 @@ cscnt_grouped_quarter <- cscnt_grouped_month %>%
   print
 
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Percentage of case with 4 riders ----------------------------------------------------------------------------------------------------------------------------------------------------------------
+case_count_4riders <- sprintf("SELECT A.*, B.TERRITORY FROM GVL_CSCNT A
+  LEFT JOIN RAWDATA_MAPPING_TERRITORY_REGION B ON A.REGIONCD = B.REGION_CODE
+  WHERE A.BUSSINESSDATE >= '%s'
+  AND A.RDOCNUM IN (
+											SELECT DISTINCT RDOCNUM FROM GVL_KPITOTAL 
+											WHERE COUNTRIDERS >= 4 
+									  )", strftime(fr, '%Y-%m-%d'))
+result <- dbSendQuery(my_database$con, case_count_4riders)
+data = fetch(result, encoding="utf-8")
+dbClearResult(result)
+
+case_count_4riders_grouped_month <- data %>% 
+  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% # parsing to date
+  group_by(TERRITORY, BUSSINESSDATE=strftime(BUSSINESSDATE, '%Y-%b')) %>% # group data by month
+  summarise(CSCNT = sum(CASE)) %>% print # count number of rows
+case_count_4riders_grouped_quarter <- case_count_4riders_grouped_month %>% 
+  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
+  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
+  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
+  dplyr::mutate(Q=quarters(BUSSINESSDATE)) %>%  # get the quarter of the bussiness date
+  dplyr::mutate(BUSSINESSDATE=paste(strftime(BUSSINESSDATE,'%Y'),Q,sep='-')) %>% # converts the bussiness date to YYYY-QQ format
+  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+  summarise(CSCNT = sum(CSCNT)) %>% # SUM number of CSCNT
+  print
+# *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # APE ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ape <- sprintf("SELECT BUSSINESSDATE, AGCODE, REGIONCD, APE, B.TERRITORY FROM GVL_KPITOTAL A
   LEFT JOIN RAWDATA_MAPPING_TERRITORY_REGION B ON A.REGIONCD = B.REGION_CODE
@@ -165,6 +191,13 @@ activity_ratio <- merge(
 activity_ratio <- activity_ratio %>% 
   dplyr::mutate(ACTIVITY_RATIO = NUMBER_OF_ACTIVE_AGENTS * 2 / (NUMBER_OF_ACTIVE_AGENTS_MONTHSTART + NUMBER_OF_ACTIVE_AGENTS_MONTHEND))
 
+
+
+
+
+
+
+# *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # save output to excel file -----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 wb <- xlsx::createWorkbook()         # create blank workbook
 sheet1 <- xlsx::createSheet(wb, sheetName="ACTIVE_AGENTS") # create different sheets
@@ -174,6 +207,7 @@ sheet4 <- xlsx::createSheet(wb, sheetName="ACTIVITY_RATIO")
 sheet5 <- xlsx::createSheet(wb, sheetName="ACTIVE_AGENTSEX")
 sheet6 <- xlsx::createSheet(wb, sheetName="CSCNT")
 sheet7 <- xlsx::createSheet(wb, sheetName="APE")
+sheet8 <- xlsx::createSheet(wb, sheetName="CSCNT_4RIDERS")
 xlsx::addDataFrame(as.data.frame(active_agents), sheet1)  # add data to the sheets
 xlsx::addDataFrame(as.data.frame(active_agents_month_start), sheet2)
 xlsx::addDataFrame(as.data.frame(active_agents_month_end), sheet3)
@@ -181,5 +215,6 @@ xlsx::addDataFrame(as.data.frame(activity_ratio), sheet4)
 xlsx::addDataFrame(as.data.frame(active_agents_ex), sheet5)
 xlsx::addDataFrame(as.data.frame(rbind(cscnt_grouped_quarter,cscnt_grouped_month)), sheet6)
 xlsx::addDataFrame(as.data.frame(rbind(ape_grouped_quarter,ape_grouped_month)), sheet7)
+xlsx::addDataFrame(as.data.frame(rbind(case_count_4riders_grouped_quarter,case_count_4riders_grouped_month)), sheet8)
 
 xlsx::saveWorkbook(wb, "KPI_PRODUCTION/output/count_active_agent.xlsx")  # write the file with multiple sheets
