@@ -2,3 +2,8 @@
 .Rhistory
 .RData
 .Ruserdata
+.db
+*.db
+*.bk20170621
+*.accdb
+*.7z

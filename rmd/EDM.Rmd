@@ -1,0 +1,125 @@
+---
+title: "EDM"
+author: "Tung Nguyen"
+date: "March 10, 2017"
+# output:
+#   html_document: default
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+      # number_sections: true
+  # pdf_document: default
+  params:
+    minimum: 100
+    region: east
+    data: results.csv
+---
+
+```{r setup, include=FALSE, results='asis'}
+# Note the use of the results='asis' chunk option. 
+# This is required to ensure that the raw table output isn’t processed further by knitr.
+knitr::opts_chunk$set(echo = FALSE)
+library(dplyr)
+library(readxl)
+library(knitr)
+# library(kableExtra)
+# options(knitr.table.format = "html") 
+if (!require("DT")) install.packages('DT')
+library(DT)
+source(paste(getwd(), 'util', 'util_extract_data.R', sep = '/'))
+source(paste(getwd(), '', 'EDM.R', sep = '/'))
+```
+
+## Channel setup {.tabset}
+### Channel
+```{r}
+env = 'COMPANY_EDM_VN'
+channel <- dplyr::tbl_df(get_channel_setup(env)) 
+knitr::kable(channel)
+# DT::datatable(channel, filter = 'bottom'
+#   , options = list(searching = TRUE, pageLength = 10, lengthMenu = c(5, 10, 15, 20))
+#   , callback = JS('table.page("next").draw(false);')
+# )
+
+
+
+```
+
+### Sub channel
+```{r}
+subchannels <- dplyr::tbl_df(get_subchannel(env)) 
+knitr::kable(subchannels)
+```
+
+### Agency
+
+```{r}
+agencies <- dplyr::tbl_df(get_agency(env))
+DT::datatable(agencies)
+```
+
+## PRODUCTION UNIT DEFINITION
+### KPI types
+```{r}
+kpi_types <- get_kpi_types(env)
+knitr::kable(kpi_types)
+```
+
+### KPI definition rules
+
+```{r}
+kpis <- get_kpi(env)
+DT::datatable(kpis, filter = 'top')
+```
+
+### KPI definition mapping to channel
+
+```{r}
+kpi_mapping <- get_kpi_mapping_to_channel (env)
+DT::datatable(kpi_mapping, filter = 'top')
+```
+
+### COMMISSION RULE DEFINITIONS
+
+```{r}
+com_rules <- get_commission_rules(env)
+DT::datatable(com_rules, filter = 'top')
+```
+
+#### COMMISSION RULE MAPPING 
+
+```{r}
+com_rule_mapping <- get_commission_rule_mapping(env)
+DT::datatable(com_rule_mapping, filter = 'top')
+```
+
+### PRODUCTS
+```{r}
+products <- get_product(env)
+DT::datatable(products, filter = 'top')
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
