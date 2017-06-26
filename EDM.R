@@ -1,9 +1,21 @@
 source(paste(getwd(), 'util', 'util_data_access_MSSQL.R', sep = '/'))
 
+# PRODUCER INFORMATION ####
+#' Title
+#'
+#' @param env 
+#' @param producercd 
+#'
+#' @return
+#' @export
+#'
+#' @examples
 get_producer_info <- function(env, producercd = '') {
   sqlText <-
     sprintf(
-      "SELECT * FROM CMS_PRODUCERCHANNEL_M WHERE PRODUCERCD='%s' OR PRODUCERSOURCECD='%s'",
+      "SELECT * FROM CMS_PRODUCERCHANNEL_M CPM, CMS_BASEPRODUCER_M CBM
+                        WHERE CPM.BASEPRODUCERSEQ = CBM.BASEPRODUCERSEQ
+                        AND (PRODUCERCD='%s' OR PRODUCERSOURCECD='%s')",
       producercd,
       producercd
     )
@@ -11,15 +23,66 @@ get_producer_info <- function(env, producercd = '') {
   queryResults
 }
 
-get_kpi_mapping_to_channel <- function(env, channelcd) {
+
+#' get_producers_info
+#'
+#' @param env 
+#' @param ... 
+#'
+#' @return list of producers
+#' @export
+#'
+#' @examples
+get_producers_info <- function(env, ...) {
   sqlText <-
-    "SELECT * FROM CMS_PRODUCTIONUNIT_DEF WHERE PRODNUNITCD IN (
-  SELECT RULECD
-  FROM CMS_RULE_MAPPING
-  WHERE CHANNELCD = '%s'
-  )
+    "SELECT * FROM CMS_PRODUCERCHANNEL_M CPM, CMS_BASEPRODUCER_M CBM
+                        WHERE CPM.BASEPRODUCERSEQ = CBM.BASEPRODUCERSEQ "
+  more_arguments = list(...)
+  if (!is.null(more_arguments) && length(more_arguments)) {
+    args = paste(more_arguments, collapse = ' AND ')
+    sqlText <- (paste(sqlText, args, sep = " AND "))
+  }
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_producer_bankinfo <- function(env, payoutdt, clientcd) {
+  sqlText <- "
+  SELECT * FROM COM_CLIENT_FIN_ACCOUNT WHERE CLIENTSEQ={1} AND '{0}' BETWEEN EFFECTIVEFROM AND ISNULL(EFFECTIVETO, GETDATE())
   "
-  queryResults <- execute_sql(sprintf(sqlText, channelcd), env)
+  sqlText <- gsub("[{][0][}]", payoutdt, sqlText)
+  sqlText <- gsub("[{][1][}]", clientcd, sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_producer_payto <- function(env, payoutdt, producercd) {
+  sqlText <- "
+  SELECT * FROM CMS_PRODUCER_PAYTO WHERE PRODUCERCD={1} AND '{0}' BETWEEN EFFECTIVEFROMDT AND ISNULL(EFFECTIVETODT, GETDATE())
+  "
+  sqlText <- gsub("[{][0][}]", payoutdt, sqlText)
+  sqlText <- gsub("[{][1][}]", producercd, sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+#---- CONFIGURATION ----
+get_channel_setup <- function(env) {
+  sqlText <-
+    "SELECT CHANNELCD, CHANNELNAME1 AS CHANNELNAME, PARENTCHANNELCD FROM CMS_CHANNEL_M WHERE PARENTCHANNELCD IS NULL"
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_subchannel <- function(env) {
+  sqlText <- "SELECT CHANNELCD AS SUBCHANNELCD, CHANNELNAME1 AS SUBCHANNELNAME, PARENTCHANNELCD FROM CMS_CHANNEL_M WHERE PARENTCHANNELCD IS NOT NULL ORDER BY PARENTCHANNELCD"
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_agency <- function(env) {
+  sqlText <- "SELECT PREFERREDNAME AS AGENCYNAME, PRODUCERCD AS AGENCYCD, PRODUCERSOURCECD AS AGENCYSOURCECD, CHANNELCD FROM CMS_PRODUCERCHANNEL_M WHERE PRODUCERTYPECD='AGENCY' ORDER BY CHANNELCD"
+  queryResults <- execute_sql(sqlText, env)
   queryResults
 }
 
@@ -30,7 +93,156 @@ get_all_agencies <- function(env) {
   queryResults
 }
 
-get_incentive <- function(env, benefitdt) {
+# PRODUCTION UNIT DEFINITION ####
+#__ KPI types ####
+get_kpi_types <- function(env) {
+  sqlText <- "SELECT CDDESC1 AS KPI_TYPE, PARAMCD FROM CMS_PRODUCTIONTYPE_K ORDER BY SORTORDER"
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_kpi <- function(env) {
+  sqlText <- "
+  SELECT PRODNUNITCD, PRODNUNITDESCRIPTION1, PRODNUNITBASISCD, STATUS, INITIATEPROCESSFL 
+  FROM CMS_PRODUCTIONUNIT_DEF 
+  ORDER BY PRODNUNITBASISCD, PRODNUNITCD
+  "
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_kpi_product_included <- function(env, kpicode) {
+  sqlText <- "
+  SELECT * FROM CMS_PRODUCT_M WHERE PRODUCTSEQ NOT IN (
+  SELECT PRODUCTSEQ FROM CMS_PRODN_PRODEXCLUDE WHERE PRODNWEIGHTAGESEQ IN (SELECT PRODNWEIGHTAGESEQ FROM CMS_PRODN_PRODWEIGHTAGE WHERE PRODNUNITCD='{0}')
+  )
+  "
+  sqlText <- gsub("[{]0[}]", kpicode, sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+#__ KPI definition mapping to channel ####
+get_kpi_mapping_to_channel <- function(env) {
+  sqlText <-
+    "SELECT RULECD, MAPPINGCONTEXTCD, CHANNELCD, DESIGNATIONCD, PRODUCERCD, EFFECTIVEFROMDT, EFFECTIVETODT   
+FROM CMS_RULE_MAPPING
+WHERE MAPPINGCONTEXTCD = 'PRM'
+ORDER BY CHANNELCD, RULECD
+  "
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_kpi_goup <- function(env, ...) {
+  sqlText <-
+    "SELECT * FROM CMS_GROUP_M WHERE 1=1 "
+  more_arguments = list(...)
+  if (!is.null(more_arguments) && length(more_arguments)) {
+    args <- paste(names(more_arguments), more_arguments, sep = ' IN ')
+    for (a in args) {
+      sqlText <- paste(sqlText, a, sep=' AND ')
+    }
+  }
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_kpi_goup_subordinate <- function(env, ...) {
+  sqlText <-
+    "SELECT * FROM CMS_GROUP_SUBORDINATE WHERE 1=1 "
+  more_arguments = list(...)
+  if (!is.null(more_arguments) && length(more_arguments)) {
+    args <- paste(names(more_arguments), more_arguments, sep = ' IN ')
+    for (a in args) {
+      sqlText <- paste(sqlText, a, sep=' AND ')
+    }
+  }
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_kpi_goup_detail <- function(env, groupcd) {
+  sqlText <-
+    "SELECT * FROM CMS_GROUP_KPI_M where GROUPCD='%s'"
+  queryResults <- execute_sql(sprintf(sqlText, groupcd), env)
+  queryResults
+}
+
+# COMMISSION RULE DEFINITIONS ####
+get_commission_rules <- function(env) {
+  sqlText <-
+    "SELECT COMMISSIONDESCRIPTION1 AS COMMISSION_NAME, COMMISSIONRULECD, COMMISSIONTYPECD, RULESTATUSCD FROM CMS_COMMRULE_DEF"
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_commission_rule_mapping <- function(env) {
+  sqlText <- "
+  SELECT RULECD, CHANNELCD, MAPPINGCONTEXTCD, EFFECTIVEFROMDT, EFFECTIVETODT 
+  FROM CMS_RULE_MAPPING
+  WHERE MAPPINGCONTEXTCD = 'CRM'
+  "
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+#---- PRODUCT ----
+get_product <- function(env, ...) {
+  sqlText <-
+    "SELECT PRODUCTNAME1, PRODUCTCD, PREMIUMTYPE, PLANTYPE, LINEOFBSNESS, PRODUCTSEQ FROM CMS_PRODUCT_M WHERE 1=1 "
+  more_arguments = list(...)
+  if (!is.null(more_arguments) && length(more_arguments)) {
+    args <- paste(names(more_arguments), more_arguments, sep = ' IN ')
+    for (a in args) {
+      sqlText <- paste(sqlText, a, sep=' AND ')
+    }
+  }
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_product_group <- function(env, ...) {
+  sqlText <-
+    "SELECT * FROM CMS_PRODUCT_GROUP WHERE 1=1 "
+  more_arguments = list(...)
+  if (!is.null(more_arguments) && length(more_arguments)) {
+    args <- paste(names(more_arguments), more_arguments, sep = ' IN ')
+    for (a in args) {
+      sqlText <- paste(sqlText, a, sep=' AND ')
+    }
+  }
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_product_group_detail <- function(env, ...) {
+  sqlText <-
+    "SELECT * FROM CMS_PRODUCT_GROUP_D WHERE 1=1 "
+  more_arguments = list(...)
+  if (!is.null(more_arguments) && length(more_arguments)) {
+    args <- paste(names(more_arguments), more_arguments, sep = ' IN ')
+    for (a in args) {
+      sqlText <- paste(sqlText, a, sep=' AND ')
+    }
+  }
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+#---- INCENTIVE ----
+get_incentive_definition <- function(env, benefitcd) {
+  sqlText <- "
+  SELECT * FROM CMS_BENEFIT_DEF where BENEFITCD='%s'
+  "
+  queryResults <- execute_sql(sprintf(sqlText, benefitcd), env)
+  queryResults
+}
+
+get_incentive_result <- function(env, ...) {
+  "
+  ... should be a list('fieldname1'='value1', 'fieldname2'='value2')
+  "
   sqlText <- "
   SELECT
   CPM.PRODUCERSOURCECD,
@@ -48,13 +260,20 @@ get_incentive <- function(env, benefitdt) {
   FROM CMS_BENEFITRESULT CB INNER JOIN CMS_PRODUCERCHANNEL_M CPM ON CB.PRODUCERCD = CPM.PRODUCERCD
   INNER JOIN CMS_BENEFIT_DEF CBD ON CBD.BENEFITCD = CB.BENEFITCD
   LEFT JOIN CMS_BENEFITPAY_RESULT CBPR ON CB.BENEFITRESULTSEQ = CBPR.BENEFITRESULTSEQ
-  WHERE CB.BENEFITDT = '%s'
+  WHERE 1=1
   "
-  queryResults <- execute_sql(sprintf(sqlText, benefitdt), env)
+  more_arguments = list(...)
+  if (!is.null(more_arguments) && length(more_arguments)) {
+    args = paste(names(more_arguments), more_arguments, sep = ' IN ')
+    for (a in args) {
+      sqlText <- (paste(sqlText, a, sep = " AND "))
+    }
+  }
+  queryResults <- execute_sql(sqlText, env)
   queryResults
 }
 
-get_incentive_kpis <- function(env, benefitdt) {
+get_incentive_result_kpis <- function(env, benefitdt) {
   sqlText <- "
   SELECT
   CB.PRODUCERCD,
@@ -70,5 +289,458 @@ get_incentive_kpis <- function(env, benefitdt) {
   WHERE CB.BENEFITDT = '%s' AND CBK.KPIVALUE <> 0
   "
   queryResults <- execute_sql(sprintf(sqlText, benefitdt), env)
+  queryResults
+}
+
+# COMMISSION ####
+get_commission <- function(env, ...) {
+  sqlText <- "SELECT * FROM CMS_PRODUCER_COMM WHERE 1=1 "
+  more_arguments = list(...)
+  if (!is.null(more_arguments) && length(more_arguments)) {
+    args = paste(names(more_arguments), more_arguments, sep = ' IN ')
+    for (a in args) {
+      sqlText <- paste(sqlText, a, sep = ' AND ')
+    }
+  }
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+#---- PAY ----
+get_payable_tbl <- function(env, ...) {
+  sqlText <- "SELECT * FROM CMS_PRODUCER_PAYABLE WHERE 1=1 "
+  more_arguments = list(...)
+  if (!is.null(more_arguments) && length(more_arguments)) {
+    args = paste(names(more_arguments), more_arguments, sep = ' IN ')
+    for (a in args) {
+      sqlText <- paste(sqlText, a, sep = ' AND ')
+    }
+  }
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_payable <- function(env, from, to, channelcd) {
+  sqlText <- "SELECT CPM.PRODUCERSOURCECD,
+              CPP.*
+  FROM CMS_PRODUCER_PAYABLE CPP
+  INNER JOIN CMS_PRODUCERCHANNEL_M CPM
+  ON CPP.PAYTOPRODUCERCD = CPM.PRODUCERCD
+  WHERE ((CPP.REVISEDCUTOFFDT >= '{0}' AND CPP.TRANSACTIONDT <= '{0}')
+  OR (CPP.REVISEDCUTOFFDT <= '{0}' AND CPP.REVISEDCUTOFFDT >= '{1}')
+  OR (CPP.REVISEDCUTOFFDT IS NULL AND CPP.DISBURSEDFL <> 'YES')
+  OR (CPP.TRANSACTIONDT >= '{1}' AND CPP.TRANSACTIONDT <= '{0}' AND CPP.DISBURSEDFL <> 'YES')
+  OR (CPP.REFERENCECD = 'ADJUSMENT' AND CPP.REVISEDCUTOFFDT = '{0}') )
+  AND CPP.TOTALPAYMENTAMT<>0
+  AND CPM.CHANNELCD IN ('{3}')"
+   sqlText <- gsub("[{][1][}]", from, sqlText)
+   sqlText <- gsub("[{][0][}]", to, sqlText)
+   sqlText <- gsub("[{][3][}]", channelcd, sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_payout <- function(env, payoutdt) {
+  sqlText <- "
+  SELECT
+        CPM.PRODUCERSOURCECD,
+        CP.*
+  FROM CMS_PAYOUT CP
+  INNER JOIN CMS_PRODUCERCHANNEL_M CPM
+  ON CP.PAYTOPRODUCERCD = CPM.PRODUCERCD
+  WHERE CP.PAYOUTDT = '{2}' --AND CPM.CHANNELCD IN ({3})
+  "
+  sqlText <- gsub("[{][2][}]", payoutdt, sqlText)
+  # sqlText <- gsub("[{][3][}]", channelcd, sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+#---- POLICY ----
+get_policy <- function(env, policycd = NULL) {
+  sqlText <- "
+  SELECT * FROM CMS_POLICY_M %s
+  "
+  where <-
+    if (is.null(policycd))
+      ''
+  else
+    sprintf("WHERE POLICYCD='%s'", policycd)
+  queryResults <- execute_sql(sprintf(sqlText, where), env)
+  queryResults
+}
+
+get_policy_premium <- function(env, policycd) {
+  sqlText <- "
+  SELECT * FROM CMS_PREMIUM WHERE POLICYCD IN (SELECT POLICYSEQ FROM CMS_POLICY_M WHERE POLICYCD='%s')
+  "
+  queryResults <- execute_sql(sprintf(sqlText, policycd), env)
+  queryResults
+}
+
+## get all products associated with the policy
+get_policy_product <- function(env, policycd) {
+  sqlText <- "
+  SELECT * FROM CMS_POLICY_PRODUCT WHERE POLICYCD IN (SELECT POLICYSEQ FROM CMS_POLICY_M WHERE POLICYCD='%s')
+  "
+  queryResults <- execute_sql(sprintf(sqlText, policycd), env)
+  queryResults
+}
+
+#---- PRODUCTION (KPI) ----
+get_production_summary_tbl <- function(env, ...) {
+  sqlText <- "
+  SELECT * FROM CMS_PRODUCTION_SUMMARY WHERE 1=1
+  "
+  more_arguments = list(...)
+  if (!is.null(more_arguments) && length(more_arguments)) {
+    args <- paste(names(more_arguments), more_arguments, sep = ' IN ')
+    for (a in args) {
+      sqlText <- paste(sqlText, a, sep=' AND ')
+    }
+  }
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_production_summary_detail_tbl <- function(env, ...) {
+  sqlText <- "
+  SELECT * FROM CMS_PROD_SUMMARY_DTL WHERE 1=1
+  "
+  more_arguments = list(...)
+  if (!is.null(more_arguments) && length(more_arguments)) {
+    args <- paste(names(more_arguments), more_arguments, sep = ' IN ')
+    for (a in args) {
+      sqlText <- paste(sqlText, a, sep=' AND ')
+    }
+  }
+  queryResults <- execute_sql(sqlText, env)
+  print(sqlText)
+  queryResults
+}
+
+update_production_summary <- function(env, sql_update) {
+  execute_update(sql_update, env)
+}
+
+get_banca_kpi_group <- function(env, processdt) {
+  sqlText <- "
+  SELECT B.PRODUCERSOURCECD,A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD, A.PRODNVALUE,A.TRANSACTIONDT, A.PRODNTYPECD,A.PRODNGROUPCD,A.PROCESSDT,A.CREATEDDT,A.PRODNSUMMSEQ  FROM CMS_PRODUCTION_SUMMARY A  INNER JOIN CMS_PRODUCERCHANNEL_M B  ON A.PRODUCERCD = B.PRODUCERCD  WHERE A.PRODNTYPECD = 'GROUP'  AND A.PROCESSDT = '{0}'  AND B.CHANNELCD IN ( 'INHOUSE', 'BANKSTAFF') 
+  "
+  sqlText <- gsub("[{]0[}]", processdt, sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_banca_kpi_group_detailbankstaff <- function(env, processdt) {
+  sqlText <- "
+  EXECUTE CMS_OTHER_PKG$SPC_GET_KPI_BREAKUP '{0}', NULL, NULL, 'BANKSTAFF' 
+  "
+  sqlText <- gsub("[{]0[}]", processdt, sqlText)
+  queryResults <- execute_store_procedure(sqlText, env)
+  queryResults
+}
+
+get_banca_kpi_group_detailinhouse <- function(env, processdt) {
+  sqlText <- "
+  EXECUTE CMS_OTHER_PKG$SPC_GET_KPI_BREAKUP '{0}', NULL, NULL, 'INHOUSE'  
+  "
+  sqlText <- gsub("[{]0[}]", processdt, sqlText)
+  queryResults <- execute_store_procedure(sqlText, env)
+  queryResults
+}
+
+get_banca_kpi_personal <- function(env, processdt) {
+  sqlText <- "
+  SELECT B.PRODUCERSOURCECD,A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD, A.PRODNVALUE,A.TRANSACTIONDT, A.PRODNTYPECD,A.SUPERVISORCD,C.PRODUCERSOURCECD as SUPERVISORPRODUCERSOURCECD, A.SUPERVISORDESIGCD,A.PROCESSDT,A.PRODNSUMMSEQ  FROM CMS_PRODUCTION_SUMMARY A  INNER JOIN CMS_PRODUCERCHANNEL_M B  ON A.PRODUCERCD = B.PRODUCERCD  LEFT JOIN CMS_PRODUCERCHANNEL_M C  ON A.SUPERVISORCD = C.PRODUCERCD  WHERE A.PRODNTYPECD = 'PERSONNEL'  AND  A.PROCESSDT = '{0}' AND A.PRODNVALUE <> 0  AND B.CHANNELCD IN ( 'INHOUSE', 'BANKSTAFF') ORDER BY B.PRODUCERSOURCECD   
+  "
+  sqlText <- gsub("[{]0[}]", processdt, sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_banca_kpi_personal_detail <- function(env, processdt) {
+  sqlText <- "
+  SELECT CPM.PRODUCERSOURCECD, CP.POLICYCD, CPS.PRODNUNITCD, CPSD.PRODUCERCD, CPSD.PRODNVALUE, CPSD.PRODUCTCD, CPS.PRODNTYPECD, CPSD.TRANSACTIONDT,CPSD.PRODNSUMMDTLSEQ  FROM CMS_PROD_SUMMARY_DTL CPSD  INNER JOIN CMS_PRODUCTION_SUMMARY CPS  ON (CPSD.PRODNSUMMSEQ = CPS.PRODNSUMMSEQ)  INNER JOIN CMS_PRODUCERCHANNEL_M CPM  ON (CPSD.PRODUCERCD = CPM.PRODUCERCD)  INNER JOIN CMS_POLICY_M CP  ON (CPSD.POLICYCD = CP.POLICYSEQ)  WHERE CPS.PROCESSDT = '{0}' AND CPSD.PRODNVALUE <> 0  AND CPM.CHANNELCD IN ( 'INHOUSE', 'BANKSTAFF') 
+  "
+  sqlText <- gsub("[{]0[}]", processdt, sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_banca_kpi_personal_detail_team <- function(env, processdt) {
+  sqlText <- "
+  SELECT
+  CPM.PRODUCERSOURCECD,
+  CP.POLICYCD,
+  CPS.PRODNUNITCD,
+  CPSD.PRODUCERCD,
+  CPSD.PRODNVALUE,
+  CPSD.PRODUCTCD,
+  CPS.PRODNTYPECD,
+  CPSD.TRANSACTIONDT,
+  CPM1.PREFERREDNAME,
+  CPM1.PRODUCERSOURCECD AS OFFICECD,
+  CPSD.PRODNSUMMDTLSEQ,
+  CPS.PRODNSUMMSEQ
+  FROM CMS_PROD_SUMMARY_DTL CPSD INNER JOIN CMS_PRODUCTION_SUMMARY CPS ON (CPSD.PRODNSUMMSEQ = CPS.PRODNSUMMSEQ)
+  INNER JOIN CMS_PRODUCERCHANNEL_M CPM ON (CPSD.PRODUCERCD = CPM.PRODUCERCD)
+  INNER JOIN CMS_POLICY_M CP ON (CPSD.POLICYCD = CP.POLICYSEQ)
+  INNER JOIN CMS_PRODUCERCHANNEL_M CPM1 ON CPS.PRODUCERBRANCHCD = CPM1.PRODUCERCD
+  WHERE CPS.PROCESSDT = '{0}' AND CPSD.PRODNVALUE <> 0 AND CPM.CHANNELCD IN ('INHOUSE', 'BANKSTAFF')
+  UNION ALL SELECT
+  CPM.PRODUCERSOURCECD,
+  CP.POLICYCD,
+  CPS.PRODNUNITCD,
+  CPSD.PRODUCERCD,
+  CPSD.PRODNVALUE,
+  CPSD.PRODUCTCD,
+  CPS.PRODNTYPECD,
+  CPSD.TRANSACTIONDT,
+  CPM1.PREFERREDNAME,
+  CPM1.PRODUCERSOURCECD AS OFFICECD,
+  CPSD.PRODNSUMMDTLSEQ,
+  CPS.PRODNSUMMSEQ
+  FROM CMS_PROD_SUMMARY_DTL CPSD INNER JOIN CMS_PRODUCTION_SUMMARY CPS ON (CPSD.PRODNSUMMSEQ = CPS.PRODNSUMMSEQ)
+  INNER JOIN CMS_PRODUCERCHANNEL_M CPM ON (CPSD.PRODUCERCD = CPM.PRODUCERCD)
+  INNER JOIN CMS_POLICY_M CP ON (CPSD.POLICYCD = CP.POLICYSEQ)
+  LEFT JOIN CMS_PRODUCERCHANNEL_M CPM1 ON CPS.OFFICECD = CPM1.PRODUCERCD
+  WHERE CPS.PROCESSDT = '{0}' AND CPSD.PRODNVALUE <> 0 AND CPM.CHANNELCD IN ('INHOUSE', 'BANKSTAFF')
+  UNION ALL SELECT
+  CPM.PRODUCERSOURCECD,
+  CP.POLICYCD,
+  CPS.PRODNUNITCD,
+  CPSD.PRODUCERCD,
+  CPSD.PRODNVALUE,
+  CPSD.PRODUCTCD,
+  CPS.PRODNTYPECD,
+  CPSD.TRANSACTIONDT,
+  CPM1.PREFERREDNAME,
+  CPM1.PRODUCERSOURCECD AS OFFICECD,
+  CPSD.PRODNSUMMDTLSEQ,
+  CPS.PRODNSUMMSEQ
+  FROM CMS_PROD_SUMMARY_DTL CPSD INNER JOIN CMS_PRODUCTION_SUMMARY CPS ON (CPSD.PRODNSUMMSEQ = CPS.PRODNSUMMSEQ)
+  INNER JOIN CMS_PRODUCERCHANNEL_M CPM ON (CPSD.PRODUCERCD = CPM.PRODUCERCD)
+  INNER JOIN CMS_POLICY_M CP ON (CPSD.POLICYCD = CP.POLICYSEQ)
+  LEFT JOIN CMS_PRODUCERCHANNEL_M CPM1 ON CPS.ZONECD = CPM1.PRODUCERCD
+  WHERE CPS.PROCESSDT = '{0}' AND CPSD.PRODNVALUE <> 0 AND CPM.CHANNELCD IN ('INHOUSE', 'BANKSTAFF')
+  UNION ALL SELECT
+  CPM.PRODUCERSOURCECD,
+  CP.POLICYCD,
+  CPS.PRODNUNITCD,
+  CPSD.PRODUCERCD,
+  CPSD.PRODNVALUE,
+  CPSD.PRODUCTCD,
+  CPS.PRODNTYPECD,
+  CPSD.TRANSACTIONDT,
+  CPM1.PREFERREDNAME,
+  CPM1.PRODUCERSOURCECD AS OFFICECD,
+  CPSD.PRODNSUMMDTLSEQ,
+  CPS.PRODNSUMMSEQ
+  FROM CMS_PROD_SUMMARY_DTL CPSD INNER JOIN CMS_PRODUCTION_SUMMARY CPS ON (CPSD.PRODNSUMMSEQ = CPS.PRODNSUMMSEQ)
+  INNER JOIN CMS_PRODUCERCHANNEL_M CPM ON (CPSD.PRODUCERCD = CPM.PRODUCERCD)
+  INNER JOIN CMS_POLICY_M CP ON (CPSD.POLICYCD = CP.POLICYSEQ)
+  LEFT JOIN CMS_PRODUCERCHANNEL_M CPM1 ON CPS.REGIONCD = CPM1.PRODUCERCD
+  WHERE CPS.PROCESSDT = '{0}' AND CPSD.PRODNVALUE <> 0 AND CPM.CHANNELCD IN ('INHOUSE', 'BANKSTAFF')
+  UNION ALL SELECT
+  CPM.PRODUCERSOURCECD,
+  CP.POLICYCD,
+  CPS.PRODNUNITCD,
+  CPSD.PRODUCERCD,
+  CPSD.PRODNVALUE,
+  CPSD.PRODUCTCD,
+  CPS.PRODNTYPECD,
+  CPSD.TRANSACTIONDT,
+  CPM1.PREFERREDNAME,
+  CPM1.PRODUCERSOURCECD AS OFFICECD,
+  CPSD.PRODNSUMMDTLSEQ,
+  CPS.PRODNSUMMSEQ
+  FROM CMS_PROD_SUMMARY_DTL CPSD INNER JOIN CMS_PRODUCTION_SUMMARY CPS ON (CPSD.PRODNSUMMSEQ = CPS.PRODNSUMMSEQ)
+  INNER JOIN CMS_PRODUCERCHANNEL_M CPM ON (CPSD.PRODUCERCD = CPM.PRODUCERCD)
+  INNER JOIN CMS_POLICY_M CP ON (CPSD.POLICYCD = CP.POLICYSEQ)
+  LEFT JOIN CMS_PRODUCERCHANNEL_M CPM1 ON CPS.AGENCYCD = CPM1.PRODUCERCD
+  WHERE CPS.PROCESSDT = '{0}' AND CPSD.PRODNVALUE <> 0 AND CPM.CHANNELCD IN ('INHOUSE', 'BANKSTAFF')
+  "
+  sqlText <- gsub("[{]0[}]", processdt, sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_banca_kpi_team <- function(env, processdt) {
+  sqlText <- "
+  SELECT B.PRODUCERSOURCECD,A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD, SUM(A.PRODNVALUE) AS VALUE, A.PROCESSDT, B.PREFERREDNAME  ,A.PRODNSUMMSEQ FROM CMS_PRODUCTION_SUMMARY A  INNER JOIN CMS_PRODUCERCHANNEL_M B  ON A.PRODUCERBRANCHCD = B.PRODUCERCD  WHERE A.PRODNTYPECD = 'PERSONNEL' AND B.PRODUCERTYPECD = 'OFFICE'  AND A.PROCESSDT = '{0}'  AND B.PRODUCERSOURCECD IN  ( SELECT OFFICE.PRODUCERSOURCECD  FROM CMS_PRODUCERCHANNEL_M AGENCY INNER JOIN CMS_BASEPRODUCER_M BASEOFFICE ON (AGENCY.BASEPRODUCERSEQ = BASEOFFICE.PARENTBASEPRODUCERSEQ)  INNER JOIN CMS_PRODUCERCHANNEL_M OFFICE ON (OFFICE.BASEPRODUCERSEQ = BASEOFFICE.BASEPRODUCERSEQ)  WHERE AGENCY.PRODUCERTYPECD = 'AGENCY'  AND AGENCY.CHANNELCD IN ( 'INHOUSE', 'BANKSTAFF')  )  GROUP BY B.PRODUCERSOURCECD,A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD,A.PROCESSDT, B.PREFERREDNAME, A.PRODNSUMMSEQ UNION  SELECT C.PRODUCERSOURCECD, A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD, SUM(A.PRODNVALUE) AS VALUE , A.PROCESSDT, C.PREFERREDNAME  ,A.PRODNSUMMSEQ FROM CMS_PRODUCTION_SUMMARY A  LEFT JOIN CMS_PRODUCERCHANNEL_M C  ON A.OFFICECD = C.PRODUCERCD  WHERE A.PRODNTYPECD = 'PERSONNEL' AND C.PRODUCERTYPECD = 'OFFICE'  AND A.PRODNUNITCD NOT IN ('ESP','CDESP')  AND A.PROCESSDT = '{0}'  AND C.PRODUCERSOURCECD IN  ( SELECT OFFICE.PRODUCERSOURCECD  FROM CMS_PRODUCERCHANNEL_M AGENCY INNER JOIN CMS_BASEPRODUCER_M BASEOFFICE ON (AGENCY.BASEPRODUCERSEQ = BASEOFFICE.PARENTBASEPRODUCERSEQ)  INNER JOIN CMS_PRODUCERCHANNEL_M OFFICE ON (OFFICE.BASEPRODUCERSEQ = BASEOFFICE.BASEPRODUCERSEQ)  WHERE AGENCY.PRODUCERTYPECD = 'AGENCY'  AND AGENCY.CHANNELCD IN ( 'INHOUSE', 'BANKSTAFF')  )  GROUP BY C.PRODUCERSOURCECD,A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD,A.PROCESSDT,C.PREFERREDNAME, A.PRODNSUMMSEQ UNION  SELECT C.PRODUCERSOURCECD, A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD, SUM(A.PRODNVALUE) , A.PROCESSDT, C.PREFERREDNAME  ,A.PRODNSUMMSEQ FROM CMS_PRODUCTION_SUMMARY A  LEFT JOIN CMS_PRODUCERCHANNEL_M C  ON A.ZONECD = C.PRODUCERCD  WHERE A.PRODNTYPECD = 'PERSONNEL' AND C.PRODUCERTYPECD = 'OFFICE'  AND A.PRODNUNITCD NOT IN ('ESP','CDESP')  AND A.PROCESSDT = '{0}'  AND C.PRODUCERSOURCECD IN  ( SELECT OFFICE.PRODUCERSOURCECD  FROM CMS_PRODUCERCHANNEL_M AGENCY INNER JOIN CMS_BASEPRODUCER_M BASEOFFICE ON (AGENCY.BASEPRODUCERSEQ = BASEOFFICE.PARENTBASEPRODUCERSEQ)  INNER JOIN CMS_PRODUCERCHANNEL_M OFFICE ON (OFFICE.BASEPRODUCERSEQ = BASEOFFICE.BASEPRODUCERSEQ)  WHERE AGENCY.PRODUCERTYPECD = 'AGENCY'  AND AGENCY.CHANNELCD IN ( 'INHOUSE', 'BANKSTAFF')  )  GROUP BY C.PRODUCERSOURCECD,A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD,A.PROCESSDT,C.PREFERREDNAME, A.PRODNSUMMSEQ UNION  SELECT C.PRODUCERSOURCECD, A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD, SUM(A.PRODNVALUE) AS VALUE , A.PROCESSDT, C.PREFERREDNAME  ,A.PRODNSUMMSEQ FROM CMS_PRODUCTION_SUMMARY A  LEFT JOIN CMS_PRODUCERCHANNEL_M C  ON A.REGIONCD = C.PRODUCERCD  WHERE A.PRODNTYPECD = 'PERSONNEL' AND C.PRODUCERTYPECD = 'OFFICE'  AND A.PRODNUNITCD NOT IN ('ESP','CDESP')  AND A.PROCESSDT = '{0}'  AND C.PRODUCERSOURCECD IN  ( SELECT OFFICE.PRODUCERSOURCECD  FROM CMS_PRODUCERCHANNEL_M AGENCY INNER JOIN CMS_BASEPRODUCER_M BASEOFFICE ON (AGENCY.BASEPRODUCERSEQ = BASEOFFICE.PARENTBASEPRODUCERSEQ)  INNER JOIN CMS_PRODUCERCHANNEL_M OFFICE ON (OFFICE.BASEPRODUCERSEQ = BASEOFFICE.BASEPRODUCERSEQ)  WHERE AGENCY.PRODUCERTYPECD = 'AGENCY'  AND AGENCY.CHANNELCD IN ( 'INHOUSE', 'BANKSTAFF')  )  GROUP BY C.PRODUCERSOURCECD,A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD,A.PROCESSDT,C.PREFERREDNAME, A.PRODNSUMMSEQ UNION  SELECT C.PRODUCERSOURCECD, A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD, SUM(A.PRODNVALUE) AS VALUE , A.PROCESSDT, C.PREFERREDNAME  ,A.PRODNSUMMSEQ FROM CMS_PRODUCTION_SUMMARY A  LEFT JOIN CMS_PRODUCERCHANNEL_M C  ON A.AGENCYCD = C.PRODUCERCD  WHERE A.PRODNTYPECD = 'PERSONNEL' AND C.PRODUCERTYPECD = 'AGENCY'  AND A.PRODNUNITCD NOT IN ('ESP','CDESP')  AND A.PROCESSDT = '{0}'  AND C.PRODUCERSOURCECD IN  ( SELECT AGENCY.PRODUCERSOURCECD FROM CMS_PRODUCERCHANNEL_M AGENCY WHERE    AGENCY.PRODUCERTYPECD = 'AGENCY'    AND AGENCY.CHANNELCD IN ( 'INHOUSE', 'BANKSTAFF')  )  GROUP BY C.PRODUCERSOURCECD,A.PRODUCERCD,A.PRODNUNITCD,A.PRODUCTCD,A.PROCESSDT,C.PREFERREDNAME,A.PRODNSUMMSEQ 
+  "
+  sqlText <- gsub("[{]0[}]", processdt, sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+get_tiedagency_kpi_group_detail <- function(env, processdt) {
+  sqlText <- "
+  EXECUTE CMS_OTHER_PKG$SPC_GET_KPI_BREAKUP '{0}', NULL, NULL, 'TIEDAGENCY' 
+  "
+  sqlText <- gsub("[{]0[}]", processdt, sqlText)
+  queryResults <- execute_store_procedure(sqlText, env)
+  queryResults
+}
+
+get_tiedagency_kpi_team <- function(env, processdt) {
+  sqlText <- "
+  SELECT
+          B.PRODUCERSOURCECD,
+  A.PRODUCERCD,
+  A.PRODNUNITCD,
+  A.PRODUCTCD,
+  SUM(A.PRODNVALUE) AS VALUE,
+  A.PROCESSDT,
+  B.PREFERREDNAME,
+  A.PRODNSUMMSEQ
+  FROM CMS_PRODUCTION_SUMMARY A
+  INNER JOIN CMS_PRODUCERCHANNEL_M B
+  ON A.PRODUCERBRANCHCD = B.PRODUCERCD
+  WHERE A.PRODNTYPECD = 'PERSONNEL' AND B.PRODUCERTYPECD = 'OFFICE'
+  AND A.PROCESSDT = '{0}'
+  AND B.PRODUCERSOURCECD IN
+  (SELECT OFFICE.PRODUCERSOURCECD
+  FROM CMS_PRODUCERCHANNEL_M AGENCY INNER JOIN CMS_BASEPRODUCER_M BASEOFFICE
+  ON (AGENCY.BASEPRODUCERSEQ = BASEOFFICE.PARENTBASEPRODUCERSEQ)
+  INNER JOIN CMS_PRODUCERCHANNEL_M OFFICE ON (OFFICE.BASEPRODUCERSEQ = BASEOFFICE.BASEPRODUCERSEQ)
+  WHERE AGENCY.PRODUCERTYPECD = 'AGENCY'
+  AND AGENCY.CHANNELCD = '{1}'
+  )
+  AND A.PRODNVALUE != 0
+  GROUP BY B.PRODUCERSOURCECD, A.PRODUCERCD, A.PRODNUNITCD, A.PRODUCTCD, A.PROCESSDT, B.PREFERREDNAME, A.PRODNSUMMSEQ
+  UNION
+  SELECT
+  C.PRODUCERSOURCECD,
+  A.PRODUCERCD,
+  A.PRODNUNITCD,
+  A.PRODUCTCD,
+  SUM(A.PRODNVALUE) AS VALUE,
+  A.PROCESSDT,
+  C.PREFERREDNAME,
+  A.PRODNSUMMSEQ
+  FROM CMS_PRODUCTION_SUMMARY A
+  LEFT JOIN CMS_PRODUCERCHANNEL_M C
+  ON A.OFFICECD = C.PRODUCERCD
+  WHERE A.PRODNTYPECD = 'PERSONNEL' AND C.PRODUCERTYPECD = 'OFFICE'
+  AND A.PRODNUNITCD NOT IN ('ESP', 'CDESP')
+  AND A.PROCESSDT = '{0}'
+  AND C.PRODUCERSOURCECD IN
+  (SELECT OFFICE.PRODUCERSOURCECD
+  FROM CMS_PRODUCERCHANNEL_M AGENCY INNER JOIN CMS_BASEPRODUCER_M BASEOFFICE
+  ON (AGENCY.BASEPRODUCERSEQ = BASEOFFICE.PARENTBASEPRODUCERSEQ)
+  INNER JOIN CMS_PRODUCERCHANNEL_M OFFICE ON (OFFICE.BASEPRODUCERSEQ = BASEOFFICE.BASEPRODUCERSEQ)
+  WHERE AGENCY.PRODUCERTYPECD = 'AGENCY'
+  AND AGENCY.CHANNELCD = '{1}'
+  )
+  AND A.PRODNVALUE != 0
+  GROUP BY C.PRODUCERSOURCECD, A.PRODUCERCD, A.PRODNUNITCD, A.PRODUCTCD, A.PROCESSDT, C.PREFERREDNAME, A.PRODNSUMMSEQ
+  UNION
+  SELECT
+  C.PRODUCERSOURCECD,
+  A.PRODUCERCD,
+  A.PRODNUNITCD,
+  A.PRODUCTCD,
+  SUM(A.PRODNVALUE) AS VALUE,
+  A.PROCESSDT,
+  C.PREFERREDNAME,
+  A.PRODNSUMMSEQ
+  FROM CMS_PRODUCTION_SUMMARY A
+  LEFT JOIN CMS_PRODUCERCHANNEL_M C
+  ON A.ZONECD = C.PRODUCERCD
+  WHERE A.PRODNTYPECD = 'PERSONNEL' AND C.PRODUCERTYPECD = 'OFFICE'
+  AND A.PRODNUNITCD NOT IN ('ESP', 'CDESP')
+  AND A.PROCESSDT = '{0}'
+  AND C.PRODUCERSOURCECD IN
+  (SELECT OFFICE.PRODUCERSOURCECD
+  FROM CMS_PRODUCERCHANNEL_M AGENCY INNER JOIN CMS_BASEPRODUCER_M BASEOFFICE
+  ON (AGENCY.BASEPRODUCERSEQ = BASEOFFICE.PARENTBASEPRODUCERSEQ)
+  INNER JOIN CMS_PRODUCERCHANNEL_M OFFICE ON (OFFICE.BASEPRODUCERSEQ = BASEOFFICE.BASEPRODUCERSEQ)
+  WHERE AGENCY.PRODUCERTYPECD = 'AGENCY'
+  AND AGENCY.CHANNELCD = '{1}'
+  )
+  AND A.PRODNVALUE != 0
+  GROUP BY C.PRODUCERSOURCECD, A.PRODUCERCD, A.PRODNUNITCD, A.PRODUCTCD, A.PROCESSDT, C.PREFERREDNAME, A.PRODNSUMMSEQ
+  UNION
+  SELECT
+  C.PRODUCERSOURCECD,
+  A.PRODUCERCD,
+  A.PRODNUNITCD,
+  A.PRODUCTCD,
+  SUM(A.PRODNVALUE) AS VALUE,
+  A.PROCESSDT,
+  C.PREFERREDNAME,
+  A.PRODNSUMMSEQ
+  FROM CMS_PRODUCTION_SUMMARY A
+  LEFT JOIN CMS_PRODUCERCHANNEL_M C
+  ON A.REGIONCD = C.PRODUCERCD
+  WHERE A.PRODNTYPECD = 'PERSONNEL' AND C.PRODUCERTYPECD = 'OFFICE'
+  AND A.PRODNUNITCD NOT IN ('ESP', 'CDESP')
+  AND A.PROCESSDT = '{0}'
+  AND C.PRODUCERSOURCECD IN
+  (SELECT OFFICE.PRODUCERSOURCECD
+  FROM CMS_PRODUCERCHANNEL_M AGENCY INNER JOIN CMS_BASEPRODUCER_M BASEOFFICE
+  ON (AGENCY.BASEPRODUCERSEQ = BASEOFFICE.PARENTBASEPRODUCERSEQ)
+  INNER JOIN CMS_PRODUCERCHANNEL_M OFFICE ON (OFFICE.BASEPRODUCERSEQ = BASEOFFICE.BASEPRODUCERSEQ)
+  WHERE AGENCY.PRODUCERTYPECD = 'AGENCY'
+  AND AGENCY.CHANNELCD = '{1}'
+  )
+  AND A.PRODNVALUE != 0
+  GROUP BY C.PRODUCERSOURCECD, A.PRODUCERCD, A.PRODNUNITCD, A.PRODUCTCD, A.PROCESSDT, C.PREFERREDNAME, A.PRODNSUMMSEQ
+  UNION
+  SELECT
+  C.PRODUCERSOURCECD,
+  A.PRODUCERCD,
+  A.PRODNUNITCD,
+  A.PRODUCTCD,
+  SUM(A.PRODNVALUE) AS VALUE,
+  A.PROCESSDT,
+  C.PREFERREDNAME,
+  A.PRODNSUMMSEQ
+  FROM CMS_PRODUCTION_SUMMARY A
+  LEFT JOIN CMS_PRODUCERCHANNEL_M C
+  ON A.AGENCYCD = C.PRODUCERCD
+  WHERE A.PRODNTYPECD = 'PERSONNEL' AND C.PRODUCERTYPECD = 'AGENCY'
+  AND A.PRODNUNITCD NOT IN ('ESP', 'CDESP')
+  AND A.PROCESSDT = '{0}'
+  AND C.PRODUCERSOURCECD IN
+  (SELECT AGENCY.PRODUCERSOURCECD
+  FROM CMS_PRODUCERCHANNEL_M AGENCY
+  WHERE
+  AGENCY.PRODUCERTYPECD = 'AGENCY'
+  AND AGENCY.CHANNELCD = '{1}'
+  )
+  AND A.PRODNVALUE != 0
+  GROUP BY C.PRODUCERSOURCECD, A.PRODUCERCD, A.PRODNUNITCD, A.PRODUCTCD, A.PROCESSDT, C.PREFERREDNAME, A.PRODNSUMMSEQ
+  "
+  sqlText <- gsub("[{]0[}]", processdt, sqlText)
+  sqlText <- gsub("[{]1[}]", 'TIEDAGENCY', sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+#---- TAX ----
+get_tax <- function(env, taxdt, channelcd) {
+  sqlText <- "
+  SELECT
+        CPM.PRODUCERSOURCECD,
+        CTP.*
+  FROM CMS_TAX_PAYABLE CTP
+  INNER JOIN CMS_PRODUCERCHANNEL_M CPM
+  ON CTP.PAYTOPRODUCERCD = CPM.PRODUCERCD
+  WHERE CTP.TAXDATE = '{0}' AND CPM.CHANNELCD IN ('{1}')
+  "
+  sqlText <- gsub("[{][0][}]", taxdt, sqlText)
+  sqlText <- gsub("[{][1][}]", channelcd, sqlText)
+  queryResults <- execute_sql(sqlText, env)
+  queryResults
+}
+
+#---- SALE DATA REPORT ----
+get_CMS_REP_DAILYPRODNSUMM_tbl <- function(env, criteria) {
+  sqlText <- "SELECT * FROM CMS_REP_DAILYPRODNSUMM"
+  sqlText <- paste(sqlText, criteria, sep = ' WHERE ')
+  queryResults <- execute_sql(sqlText, env)
   queryResults
 }
