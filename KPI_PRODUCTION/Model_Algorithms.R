@@ -12,6 +12,36 @@ library(xlsx)
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Functions ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+add_separated_col <- function(tem, pos, colnam) {
+  tem1 = tem[,1:pos]
+  tem1[,colnam] = ''
+  tem = tem[, -c(1:pos)]
+  cbind(tem1,tem)
+}
+
+compare_mom_qoq <- function(tem, fr_column, to_column, remove_compared = F) {
+  # tem = North_results
+  # fr_column =44
+  # to_column=53
+  # tem: data frame
+  # fr_column: from column idx
+  # to_column: to column idx
+  # total_col = ncol(tem)
+  tem1 = tem[,1:to_column] # create tem1 included the 1st to to_column columns
+  tem = tem[,-c(1:to_column)] # remove columns from 1st to to_column from tem
+  total_col = (to_column-fr_column+1)/2
+  for (i in fr_column:(fr_column+total_col-1)) {
+    col0 = colnames(tem1)[i]
+    col1 = colnames(tem1)[i+total_col]
+    tem1 = mutate(tem1, newcolname = tem1[,col1]/tem1[,col0]-1) 
+    names(tem1)= gsub('newcolname', sprintf('MoM%s', col1), names(tem1))
+  }
+  if (remove_compared) {
+    tem1 = tem1[,-c(fr_column:to_column)]
+  }
+  names(tem1) <- gsub('^MoMMoM', 'MoM', names(tem1))
+  cbind(tem1,tem)
+}
 compare_yoy <- function(tem, fr_column, to_column, remove_compared = F) {
   # tem = North_results
   # fr_column =4
@@ -34,14 +64,50 @@ compare_yoy <- function(tem, fr_column, to_column, remove_compared = F) {
   }
   cbind(tem1,tem)
 }
-filter_data_for_yoy <- function(kpidata_grouped_month) {
-  yoy0 <<- kpidata_grouped_month %>% 
+
+filter_data_for_mom <- function(kpidata_grouped_month) {
+  # filter data of the current year
+  month_of_year0 <- kpidata_grouped_month %>% 
     dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
     dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
     print
-  yoy1 <<- kpidata_grouped_month %>% 
+  # filter data for the current year -1 
+  month_of_year1 <- kpidata_grouped_month %>% 
+    dplyr::filter(BUSSINESSDATE %in% month_of_year0$Y_1) %>% # filter for the current year -1
+    print
+  # row binding data of the current year and the the current year -1
+  month_of_year <- month_of_year0 %>% 
+    rbind(.,month_of_year1) %>% # binding y0 and y1
+    dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
+    dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
+    dplyr::mutate(BUSSINESSDATE=sprintf('MoM-%s',strftime(BUSSINESSDATE,'%b-%Y'))) %>% # converts the bussiness date to YYYY-QQ format
+    group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+    dplyr::select(-c(Y_1, D)) %>% 
+    print
+  month_of_year
+}
+
+filter_data_for_yoy <- function(kpidata_grouped_month) {
+  # filter data of the current year
+  yoy0 <- kpidata_grouped_month %>% 
+    dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
+    dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
+    print
+  # filter data for the current year -1 
+  yoy1 <- kpidata_grouped_month %>% 
     dplyr::filter(BUSSINESSDATE %in% yoy0$Y_1) %>% # filter for the current year -1
     print
+  # row binding data of the current year and the the current year -1
+  yoy <- yoy0 %>% 
+    rbind(.,yoy1) %>% # binding y0 and y1
+    dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
+    dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
+    dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
+    group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+    print
+  yoy
 }
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -92,7 +158,7 @@ YoY <- last_day_of_years %>% # select the last 2 elements
   dplyr::mutate(BUSSINESSDATE_FM1=sprintf("YoY%s", strftime(BUSSINESSDATE, "%Y"))) %>% 
   print
 # North ####
-North <- rbind(Y, YoY, Q, M)  %>%  mutate(id = row_number()) # mutates a new order col
+North <- rbind(Y, YoY, Q, M, MoM)  %>%  mutate(id = row_number()) # mutates a new order col
 
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Ending Manpower_SA ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -130,21 +196,8 @@ ending_manpower_sa_ytd <- ending_manpower_sa %>%
   group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
   summarise(SA = sum(SA)) %>% # SUM man power
   print
-ending_manpower_sa_yoy0 <- ending_manpower_sa %>% 
-  dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
-  dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
-  print
-ending_manpower_sa_yoy1 <- ending_manpower_sa %>% 
-  dplyr::filter(BUSSINESSDATE %in% ending_manpower_sa_yoy0$Y_1) %>% # filter for the current year -1
-  # dplyr::mutate(SA=-1*SA) %>% 
-  print
-ending_manpower_sa_yoy <- ending_manpower_sa_yoy0 %>% 
-  rbind(.,ending_manpower_sa_yoy1) %>% # binding y0 and y1
-  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
-  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
-  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
-  dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
-  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+ending_manpower_sa_mom <- filter_data_for_mom(ending_manpower_sa)
+ending_manpower_sa_yoy <- filter_data_for_yoy(ending_manpower_sa) %>% 
   summarise(SA = sum(SA)) %>% # SUM man power
   print
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -183,21 +236,8 @@ ending_manpower_exsa_ytd <- ending_manpower_exsa %>%
   group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
   summarise('Ending Manpower_ExSA' = sum(`Ending Manpower_ExSA`)) %>% # SUM man power
   print
-ending_manpower_exsa_yoy0 <- ending_manpower_exsa %>% 
-  dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
-  dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
-  print
-ending_manpower_exsa_yoy1 <- ending_manpower_exsa %>% 
-  dplyr::filter(BUSSINESSDATE %in% ending_manpower_exsa_yoy0$Y_1) %>% # filter for the current year -1
-  # dplyr::mutate(`Ending Manpower_ExSA`=-1*`Ending Manpower_ExSA`) %>% 
-  print
-ending_manpower_exsa_yoy <- ending_manpower_exsa_yoy0 %>% 
-  rbind(., ending_manpower_exsa_yoy1) %>% 
-  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
-  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
-  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
-  dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
-  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+ending_manpower_exsa_mom <- filter_data_for_mom(ending_manpower_exsa)
+ending_manpower_exsa_yoy <- filter_data_for_yoy(ending_manpower_exsa) %>% 
   summarise(`Ending Manpower_ExSA` = sum(`Ending Manpower_ExSA`)) %>% # SUM man power
   print
   
@@ -232,20 +272,9 @@ cscnt_grouped_ytd <- cscnt_grouped_month %>%
   group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
   summarise('#cases' = sum(`#cases`)) %>% # SUM number of CSCNT
   print
-cscnt_yoy0 <- cscnt_grouped_month %>% 
-  dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
-  dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
-  print
-cscnt_yoy1 <- cscnt_grouped_month %>% 
-  dplyr::filter(BUSSINESSDATE %in% cscnt_yoy0$Y_1) %>% # filter for the current year -1
-  print
-cscnt_yoy <- cscnt_yoy0 %>% 
-  rbind(., cscnt_yoy1) %>% 
-  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
-  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
-  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
-  dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
-  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+
+cscnt_mom <- filter_data_for_mom(cscnt_grouped_month) 
+cscnt_yoy <- filter_data_for_yoy(cscnt_grouped_month) %>% 
   summarise(`#cases` = sum(`#cases`)) %>% # SUM man power
   print
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -282,20 +311,9 @@ case_count_4riders_ytd <- case_count_4riders_grouped_month %>%
   group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
   summarise('% case with 4 riders' = sum(`% case with 4 riders`)) %>% # SUM number of CSCNT
   print
-case_count_4riders_yoy0 <- case_count_4riders_grouped_month %>% 
-  dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
-  dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
-  print
-case_count_4riders_yoy1 <- case_count_4riders_grouped_month %>% 
-  dplyr::filter(BUSSINESSDATE %in% case_count_4riders_yoy0$Y_1) %>% # filter for the current year -1
-  print
-case_count_4riders_yoy <- case_count_4riders_yoy0 %>% 
-  rbind(., case_count_4riders_yoy1) %>% 
-  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
-  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
-  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
-  dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
-  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+
+case_count_4riders_mom <- filter_data_for_mom(case_count_4riders_grouped_month) 
+case_count_4riders_yoy <- filter_data_for_yoy(case_count_4riders_grouped_month) %>% 
   summarise(`% case with 4 riders` = sum(`% case with 4 riders`)) %>% # SUM `% case with 4 riders`
   print
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -331,20 +349,9 @@ ape_grouped_ytd <- ape_grouped_month %>%
   group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
   summarise(APE = sum(APE)) %>% # SUM number of CSCNT
   print
-ape_grouped_yoy0 <- ape_grouped_month %>% 
-  dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
-  dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
-  print
-ape_grouped_yoy1 <- ape_grouped_month %>% 
-  dplyr::filter(BUSSINESSDATE %in% ape_grouped_yoy0$Y_1) %>% # filter for the current year -1
-  print
-ape_grouped_yoy <- ape_grouped_yoy0 %>% 
-  rbind(., ape_grouped_yoy1) %>% 
-  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
-  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
-  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
-  dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
-  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+
+ape_grouped_mom <- filter_data_for_mom(ape_grouped_month) 
+ape_grouped_yoy <- filter_data_for_yoy(ape_grouped_month) %>% 
   summarise(APE = sum(APE)) %>% # SUM `% case with 4 riders`
   print
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -382,20 +389,9 @@ active_agents_grouped_ytd <- active_agents %>%
   group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
   summarise('# Active'=sum(`# Active`)) %>% # SUM number of ACTIVE_AGENTS
   print
-active_agents_yoy0 <- active_agents %>% 
-  dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
-  dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
-  print
-active_agents_yoy1 <- active_agents %>% 
-  dplyr::filter(BUSSINESSDATE %in% active_agents_yoy0$Y_1) %>% # filter for the current year -1
-  print
-active_agents_yoy <- active_agents_yoy0 %>% 
-  rbind(., active_agents_yoy1) %>% 
-  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
-  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
-  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
-  dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
-  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+
+active_agents_mom <- filter_data_for_mom(active_agents) 
+active_agents_yoy <- filter_data_for_yoy(active_agents) %>% 
   summarise(`# Active` = sum(`# Active`)) %>% # SUM `% case with 4 riders`
   print
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -433,20 +429,9 @@ active_agents_ex_ytd <- active_agents_ex %>%
   group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
   summarise('# Active_ExSA'=sum(`# Active_ExSA`)) %>% # SUM number of ACTIVE_AGENTSEX
   print
-active_agents_ex_yoy0 <- active_agents_ex %>% 
-  dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
-  dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
-  print
-active_agents_ex_yoy1 <- active_agents_ex %>% 
-  dplyr::filter(BUSSINESSDATE %in% active_agents_ex_yoy0$Y_1) %>% # filter for the current year -1
-  print
-active_agents_ex_yoy <- active_agents_ex_yoy0 %>% 
-  rbind(., active_agents_ex_yoy1) %>% 
-  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
-  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
-  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
-  dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
-  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+
+active_agents_ex_mom <- filter_data_for_mom(active_agents_ex) 
+active_agents_ex_yoy <- filter_data_for_yoy(active_agents_ex) %>% 
   summarise(`# Active_ExSA` = sum(`# Active_ExSA`)) %>% # SUM `% case with 4 riders`
   print
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -484,20 +469,9 @@ active_agents_month_start_ytd <- active_agents_month_start %>%
   group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
   summarise(ACTIVE_AGENTS_MONTHSTART=sum(ACTIVE_AGENTS_MONTHSTART)) %>% # SUM number of ACTIVE_AGENTS_MONTHSTART
   print
-active_agents_month_start_yoy0 <- active_agents_month_start %>% 
-  dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
-  dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
-  print
-active_agents_month_start_yoy1 <- active_agents_month_start %>% 
-  dplyr::filter(BUSSINESSDATE %in% active_agents_month_start_yoy0$Y_1) %>% # filter for the current year -1
-  print
-active_agents_month_start_yoy <- active_agents_month_start_yoy0 %>% 
-  rbind(., active_agents_month_start_yoy1) %>% 
-  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
-  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
-  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
-  dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
-  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+
+active_agents_month_start_mom <- filter_data_for_mom(active_agents_month_start) 
+active_agents_month_start_yoy <- filter_data_for_yoy(active_agents_month_start) %>% 
   summarise(`ACTIVE_AGENTS_MONTHSTART` = sum(`ACTIVE_AGENTS_MONTHSTART`)) %>% # SUM `% case with 4 riders`
   print
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -535,20 +509,9 @@ active_agents_month_end_ytd <- active_agents_month_end %>%
   group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
   summarise(ACTIVE_AGENTS_MONTHEND=sum(ACTIVE_AGENTS_MONTHEND)) %>% # SUM number of ACTIVE_AGENTS_MONTHEND
   print
-active_agents_month_end_yoy0 <- active_agents_month_end %>% 
-  dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
-  dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
-  print
-active_agents_month_end_yoy1 <- active_agents_month_end %>% 
-  dplyr::filter(BUSSINESSDATE %in% active_agents_month_end_yoy0$Y_1) %>% # filter for the current year -1
-  print
-active_agents_month_end_yoy <- active_agents_month_end_yoy0 %>% 
-  rbind(., active_agents_month_end_yoy1) %>% 
-  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
-  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
-  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
-  dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
-  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+
+active_agents_month_end_mom <- filter_data_for_mom(active_agents_month_end)
+active_agents_month_end_yoy <- filter_data_for_yoy(active_agents_month_end) %>% 
   summarise(ACTIVE_AGENTS_MONTHEND=sum(ACTIVE_AGENTS_MONTHEND)) %>% # SUM `% case with 4 riders`
   print
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -589,20 +552,9 @@ persistency_k1_ytd <- persistency_k1_month %>%
   summarise(TOTALAPECURRENT_REGION=sum(TOTALAPECURRENT_REGION), TOTALAPEORIGINAL_REGION=sum(TOTALAPEORIGINAL_REGION)) %>% 
   dplyr::mutate('Persistency K1'=TOTALAPECURRENT_REGION/TOTALAPEORIGINAL_REGION) %>% 
   print
-persistency_k1_yoy0 <- persistency_k1_month %>% 
-  dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
-  dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
-  print
-persistency_k1_yoy1 <- persistency_k1_month %>% 
-  dplyr::filter(BUSSINESSDATE %in% persistency_k1_yoy0$Y_1) %>% # filter for the current year -1
-  print
-persistency_k1_yoy <- persistency_k1_yoy0 %>% 
-  rbind(., persistency_k1_yoy1) %>% 
-  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
-  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
-  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
-  dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
-  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+
+persistency_k1_mom <- filter_data_for_mom(persistency_k1_month) 
+persistency_k1_yoy <- filter_data_for_yoy(persistency_k1_month) %>% 
   summarise(TOTALAPECURRENT_REGION=sum(TOTALAPECURRENT_REGION), TOTALAPEORIGINAL_REGION=sum(TOTALAPEORIGINAL_REGION)) %>% 
   dplyr::mutate('Persistency K1'=TOTALAPECURRENT_REGION/TOTALAPEORIGINAL_REGION) %>% 
   print
@@ -644,20 +596,9 @@ persistency_k2_ytd <- persistency_k2_month %>%
   summarise(TOTALAPECURRENT_REGION=sum(TOTALAPECURRENT_REGION), TOTALAPEORIGINAL_REGION=sum(TOTALAPEORIGINAL_REGION)) %>% 
   dplyr::mutate('Persistency K2'=TOTALAPECURRENT_REGION/TOTALAPEORIGINAL_REGION) %>% 
   print
-persistency_k2_yoy0 <- persistency_k2_month %>% 
-  dplyr::filter(startsWith(BUSSINESSDATE, strftime(to, '%Y'))) %>% # filter for the current year 
-  dplyr::mutate(Y_1=gsub(strftime(to, '%Y'), strftime(last_day_of_years[length(last_day_of_years)-1], '%Y'), BUSSINESSDATE)) %>%  # create new coresponding month column of the previous year
-  print
-persistency_k2_yoy1 <- persistency_k2_month %>% 
-  dplyr::filter(BUSSINESSDATE %in% persistency_k2_yoy0$Y_1) %>% # filter for the current year -1
-  print
-persistency_k2_yoy <- persistency_k2_yoy0 %>% 
-  rbind(., persistency_k2_yoy1) %>% 
-  dplyr::mutate(D='01') %>% # adds a column named D, equals to 01
-  dplyr::mutate(BUSSINESSDATE=paste(BUSSINESSDATE,D,sep='-')) %>% # adds 01 to the bussiness date
-  dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%b-%d'))) %>% # converts the bussiness date to date datatype
-  dplyr::mutate(BUSSINESSDATE=sprintf('YoY%s',strftime(BUSSINESSDATE,'%Y'))) %>% # converts the bussiness date to YYYY-QQ format
-  group_by(TERRITORY, BUSSINESSDATE) %>% # group data by month
+
+persistency_k2_mom <- filter_data_for_mom(persistency_k2_month) 
+persistency_k2_yoy <- filter_data_for_yoy(persistency_k2_month) %>% 
   summarise(TOTALAPECURRENT_REGION=sum(TOTALAPECURRENT_REGION), TOTALAPEORIGINAL_REGION=sum(TOTALAPEORIGINAL_REGION)) %>% 
   dplyr::mutate('Persistency K2'=TOTALAPECURRENT_REGION/TOTALAPEORIGINAL_REGION) %>% 
   print
@@ -710,6 +651,18 @@ activity_ratio_ytd <- active_agents_grouped_ytd %>%
   dplyr::mutate('Activity Ratio'=`# Active`*2/(ACTIVE_AGENTS_MONTHSTART+ACTIVE_AGENTS_MONTHEND)) %>% 
   print
 # ---
+activity_ratio_mom <- active_agents_mom %>% 
+  merge(x = ., y = active_agents_month_start_mom,
+        by.x = c('TERRITORY',	'BUSSINESSDATE'),
+        by.y = c('TERRITORY',	'BUSSINESSDATE' ),
+        all.x = TRUE) %>% 
+  merge(x = ., y = active_agents_month_end_mom,
+        by.x = c('TERRITORY',	'BUSSINESSDATE'),
+        by.y = c('TERRITORY',	'BUSSINESSDATE' ),
+        all.x = TRUE) %>% 
+  dplyr::mutate('Activity Ratio'=`# Active`*2/(ACTIVE_AGENTS_MONTHSTART+ACTIVE_AGENTS_MONTHEND)) %>% 
+  print
+# ---
 activity_ratio_yoy <- active_agents_yoy %>% 
   merge(x = ., y = active_agents_month_start_yoy,
         by.x = c('TERRITORY',	'BUSSINESSDATE'),
@@ -724,54 +677,54 @@ activity_ratio_yoy <- active_agents_yoy %>%
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Build the last results --------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 North <- North %>% 
-  merge(x=., y=dplyr::filter(rbind(ending_manpower_exsa_ytd, ending_manpower_exsa_yoy, ending_manpower_exsa_quarter,ending_manpower_exsa), TERRITORY=='NORTH'), 
+  merge(x=., y=dplyr::filter(rbind(ending_manpower_exsa_ytd, ending_manpower_exsa_yoy, ending_manpower_exsa_mom, ending_manpower_exsa_quarter,ending_manpower_exsa), TERRITORY=='NORTH'), 
         by.x = c('BUSSINESSDATE_FM1'),
         by.y = c('BUSSINESSDATE' ),
         all.x = TRUE) %>% 
   dplyr::select(-TERRITORY) %>% # remove TERRITORY col
-  merge(x=., y=dplyr::filter(rbind(ending_manpower_sa_ytd, ending_manpower_sa_yoy, ending_manpower_sa_quarter,ending_manpower_sa), TERRITORY=='NORTH'), 
+  merge(x=., y=dplyr::filter(rbind(ending_manpower_sa_ytd, ending_manpower_sa_yoy, ending_manpower_sa_mom, ending_manpower_sa_quarter,ending_manpower_sa), TERRITORY=='NORTH'), 
         by.x = c('BUSSINESSDATE_FM1'),
         by.y = c('BUSSINESSDATE' ),
         all.x = TRUE) %>% 
   dplyr::select(-TERRITORY) %>% # remove TERRITORY col
-  merge(x=., y=dplyr::filter(rbind(activity_ratio_ytd, activity_ratio_yoy, activity_ratio_grouped_quarter, activity_ratio), TERRITORY=='NORTH'), 
+  merge(x=., y=dplyr::filter(rbind(activity_ratio_ytd, activity_ratio_yoy, activity_ratio_mom, activity_ratio_grouped_quarter, activity_ratio), TERRITORY=='NORTH'), 
         by.x = c('BUSSINESSDATE_FM1'),
         by.y = c('BUSSINESSDATE' ),
         all.x = TRUE) %>% 
   dplyr::select(-TERRITORY) %>% # remove TERRITORY col
   dplyr::select(-c(`# Active`, ACTIVE_AGENTS_MONTHSTART, ACTIVE_AGENTS_MONTHEND)) %>% # remove TERRITORY col
-  merge(x=., y=dplyr::filter(rbind(active_agents_ex_ytd, active_agents_ex_yoy, active_agents_ex_grouped_quarter, active_agents_ex), TERRITORY=='NORTH'), 
+  merge(x=., y=dplyr::filter(rbind(active_agents_ex_ytd, active_agents_ex_yoy, active_agents_ex_mom, active_agents_ex_grouped_quarter, active_agents_ex), TERRITORY=='NORTH'), 
         by.x = c('BUSSINESSDATE_FM1'),
         by.y = c('BUSSINESSDATE' ),
         all.x = TRUE) %>% 
   dplyr::select(-TERRITORY) %>% # remove TERRITORY col
-  merge(x=., y=dplyr::filter(rbind(active_agents_grouped_ytd, active_agents_yoy, active_agents_grouped_quarter, active_agents), TERRITORY=='NORTH'), 
+  merge(x=., y=dplyr::filter(rbind(active_agents_grouped_ytd, active_agents_yoy, active_agents_mom, active_agents_grouped_quarter, active_agents), TERRITORY=='NORTH'), 
         by.x = c('BUSSINESSDATE_FM1'),
         by.y = c('BUSSINESSDATE' ),
         all.x = TRUE) %>% 
   dplyr::select(-TERRITORY) %>% # remove TERRITORY col
-  merge(x=., y=dplyr::filter(rbind(cscnt_grouped_ytd, cscnt_yoy, cscnt_grouped_quarter,cscnt_grouped_month), TERRITORY=='NORTH'), 
+  merge(x=., y=dplyr::filter(rbind(cscnt_grouped_ytd, cscnt_yoy, cscnt_mom, cscnt_grouped_quarter,cscnt_grouped_month), TERRITORY=='NORTH'), 
         by.x = c('BUSSINESSDATE_FM1'),
         by.y = c('BUSSINESSDATE' ),
         all.x = TRUE) %>% 
   dplyr::select(-TERRITORY) %>% # remove TERRITORY col
-  merge(x=., y=dplyr::filter(rbind(ape_grouped_ytd, ape_grouped_yoy, ape_grouped_quarter,ape_grouped_month), TERRITORY=='NORTH'), 
+  merge(x=., y=dplyr::filter(rbind(ape_grouped_ytd, ape_grouped_yoy, ape_grouped_mom, ape_grouped_quarter,ape_grouped_month), TERRITORY=='NORTH'), 
         by.x = c('BUSSINESSDATE_FM1'),
         by.y = c('BUSSINESSDATE' ),
         all.x = TRUE) %>% 
   dplyr::select(-TERRITORY) %>% # remove TERRITORY col
-  merge(x=., y=dplyr::filter(rbind(case_count_4riders_ytd, case_count_4riders_yoy, case_count_4riders_grouped_quarter,case_count_4riders_grouped_month), TERRITORY=='NORTH'), 
+  merge(x=., y=dplyr::filter(rbind(case_count_4riders_ytd, case_count_4riders_yoy, case_count_4riders_mom, case_count_4riders_grouped_quarter,case_count_4riders_grouped_month), TERRITORY=='NORTH'), 
         by.x = c('BUSSINESSDATE_FM1'),
         by.y = c('BUSSINESSDATE' ),
         all.x = TRUE) %>% 
   dplyr::select(-TERRITORY) %>% # remove TERRITORY col
-  merge(x=., y=dplyr::filter(rbind(persistency_k1_ytd, persistency_k1_yoy, persistency_k1_quarter,persistency_k1_month), TERRITORY=='NORTH'), 
+  merge(x=., y=dplyr::filter(rbind(persistency_k1_ytd, persistency_k1_yoy, persistency_k1_mom, persistency_k1_quarter,persistency_k1_month), TERRITORY=='NORTH'), 
         by.x = c('BUSSINESSDATE_FM1'),
         by.y = c('BUSSINESSDATE' ),
         all.x = TRUE) %>% 
   dplyr::select(-TERRITORY) %>% # remove TERRITORY col
   dplyr::select(-c(TOTALAPEORIGINAL_REGION, TOTALAPECURRENT_REGION)) %>% # remove TERRITORY col
-  merge(x=., y=dplyr::filter(rbind(persistency_k2_ytd, persistency_k2_yoy, persistency_k2_quarter,persistency_k2_month), TERRITORY=='NORTH'), 
+  merge(x=., y=dplyr::filter(rbind(persistency_k2_ytd, persistency_k2_yoy, persistency_k2_mom, persistency_k2_quarter,persistency_k2_month), TERRITORY=='NORTH'), 
         by.x = c('BUSSINESSDATE_FM1'),
         by.y = c('BUSSINESSDATE' ),
         all.x = TRUE) %>% 
@@ -792,15 +745,26 @@ North_results <- North %>%
   setNames(North[,1]) %>% # set columns' name by the first row's values
   print
 
-#Remove columns from dataframe where ALL values are NA
-#excluded all columns whose total na values of a column = total row
+#Remove columns from dataframe where ALL values are NA ####
+#excluded all columns whose total na values of a column = total row ####
 North_results <- North_results[,colSums(is.na(North_results))<nrow(North_results)] 
+
 North_results <- compare_yoy(
   North_results,
   head(grep("^YoY[0-9]{4}$", names(North_results)),1),
   tail(grep("^YoY[0-9]{4}$", names(North_results)),1), 
   T) %>% 
   print
+
+North_results <- compare_mom_qoq(
+  North_results,
+  head(grep("^MoM.*[0-9]{4}$", names(North_results)),1),
+  tail(grep("^MoM.*[0-9]{4}$", names(North_results)),1),
+  T) %>%
+  print
+# add separated columns afther the last columns whose prefix is YoY ####
+North_results <- add_separated_col(North_results, tail(grep("^YoY", names(North_results)),1), 'sep1')
+
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Save output to excel file -----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 wb <- xlsx::createWorkbook(type="xlsx")         # create blank workbook
@@ -838,7 +802,7 @@ xlsx::addDataFrame(as.data.frame(North_results),
                    colnamesStyle = TABLE_COLNAMES_STYLE,
                    rownamesStyle = TABLE_ROWNAMES_STYLE
                    )  # add data to the sheet
-# Create a freeze pane, fix first row and column
+# Create a freeze pane, fix first row and column ####
 xlsx::createFreezePane(sheet0, 2, 2)
 rows  <- getRows(sheet0, rowIndex=2:(nrow(North_results)+1))   # get all the rows excluded 1st row is headers
 # Set cell stype
@@ -847,17 +811,24 @@ cells <- xlsx::getCells(rows, colIndex = 2:(ncol(North_results)+1)) # get all th
 # apply the NUMERIC_STYLE for all the cells
 lapply(names(cells), function(ii) setCellStyle(cells[[ii]], NUMERIC_STYLE))
 
-# format cel A1 Overall KPI performance
+# format cel A1 Overall KPI performance ####
 cell11 <- getCells(getRows(sheet0,rowIndex=1:2),colIndex = 1:2)[[1]]
 xlsx::setCellValue(cell11, "Overall KPI performance")
 xlsx::setCellStyle(cell11, TABLE_COLNAMES_STYLE_BLUE)
 
-# format percentage for YoY column
+# format percentage for YoY, MoM columns ####
 cellsYoY <- xlsx::getCells(rows, colIndex = 1+grep("YoY", names(North_results)))
 lapply(names(cellsYoY), function (x) setCellStyle(cellsYoY[[x]], PERCENTAGE_STYLE))
+cellsMoM <- xlsx::getCells(rows, colIndex = 1+grep("MoM", names(North_results)))
+lapply(names(cellsMoM), function (x) setCellStyle(cellsMoM[[x]], PERCENTAGE_STYLE))
 
-# autosize column widths for all the columns in the sheet
+# autosize column widths for all the columns in the sheet ####
 xlsx::autoSizeColumn(sheet0, colIndex=1:(1+ncol(North_results)))
+
+# replace separated columns' values by sep1
+header_row  <- getRows(sheet0, rowIndex=1)   # get the header row
+cellsSeps <- xlsx::getCells(header_row, colIndex = 1+grep("^sep", names(North_results)))
+lapply(names(cellsSeps), function (x) setCellValue(cellsSeps[[x]], ''))
 
 xlsx::addDataFrame(as.data.frame(rbind(active_agents_grouped_quarter, active_agents)), sheet1, row.names=F)  # add data to the sheet
 xlsx::addDataFrame(as.data.frame(rbind(active_agents_month_start_grouped_quarter, active_agents_month_start)), sheet2, row.names=F)
