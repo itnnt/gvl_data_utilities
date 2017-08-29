@@ -12,4 +12,15 @@ for (business_date in generate_last_day_of_month(2016)) {
 for (business_date in generate_last_day_of_month(2017)) {
   demoted_AL(as.Date(business_date)) %>% insert_or_replace_bulk(., 'report_kpi_segmentation')
 }
+for (business_date in generate_last_day_of_month(2017)) {
+  terminated_agents(as.Date(business_date)) %>% insert_or_replace_bulk(., 'report_kpi_segmentation')
+}
+for (business_date in generate_last_day_of_month(2017)) {
+  get_segmentation_by_genlion_sa_rookie(as.Date(business_date)) %>% insert_or_replace_bulk(., 'report_kpi_segmentation')
+}
+
+# get_segmentation_by_genlion_sa_rookie(as.Date('2017-04-30')) 
+# get_segmentation_by_genlion_sa_rookie(as.Date('2017-05-31')) 
+# terminated_agents(as.Date('2017-05-31'))
+
 

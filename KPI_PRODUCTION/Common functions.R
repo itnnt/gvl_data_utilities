@@ -625,11 +625,11 @@ get_Manpower_genlion <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/ma
     ldpq = zoo::as.Date(zoo::as.yearqtr(d)) - 1
     result <- dbSendQuery(my_database$con, sprintf(SQL, d, ldpq))
     data = fetch(result, encoding="utf-8")
-    dbClearResult(result)
+    # dbClearResult(result)
     data
   })
   )
-  dbDisconnect(my_database$con)
+  # dbDisconnect(my_database$con)
   Active_GenLion
 }
 
@@ -666,15 +666,18 @@ get_Manpower_sa <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/main_da
     paste(last_day_of_months, collapse = "','"))
   result <- dbSendQuery(my_database$con, SQL)
   data = fetch(result, encoding="utf-8")
-  dbClearResult(result)
-  dbDisconnect(my_database$con)
+  # dbClearResult(result)
+  # dbDisconnect(my_database$con)
   data
 }
 
 get_Manpower <- function(last_day_of_months, included_ter_ag=F, dbfile = 'KPI_PRODUCTION/main_database.db'){
   my_database <- src_sqlite(dbfile, create = TRUE)
   SQL <- sprintf(
-    "SELECT A.AGENT_CODE, A.SUPERVISOR_CODE, A.SUPERVISOR_CODE_DESIGNATION, A.REGIONCD, B.TERRITORY, A.JOINING_DATE, A.BUSSINESSDATE, A.REINSTATEMENT_DATE, A.AGENT_DESIGNATION  
+    "SELECT A.AGENT_CODE, A.SUPERVISOR_CODE, A.SUPERVISOR_CODE_DESIGNATION, 
+       A.REGIONCD, B.TERRITORY, A.JOINING_DATE, A.BUSSINESSDATE, A.TERMINATION_DATE, 
+       A.REINSTATEMENT_DATE, A.AGENT_DESIGNATION,
+       A1.AGENT_STATUS
     FROM RAWDATA_MANPOWER_ACTIVERATIO A
     JOIN GVL_AGENTLIST A1 ON (A.BUSSINESSDATE=A1.BUSSINESSDATE AND A.AGENT_CODE=A1.AGENTCD)
     JOIN RAWDATA_MAPPING_TERRITORY_REGION B ON A.REGIONCD = B.REGION_CODE 
@@ -684,8 +687,8 @@ get_Manpower <- function(last_day_of_months, included_ter_ag=F, dbfile = 'KPI_PR
     paste(last_day_of_months, collapse = "','"),  ifelse(included_ter_ag,'Terminated',''))
   result <- dbSendQuery(my_database$con, SQL)
   data = fetch(result, encoding="utf-8")
-  dbClearResult(result)
-  dbDisconnect(my_database$con)
+  # dbClearResult(result)
+  # dbDisconnect(my_database$con)
   data
 }
 
@@ -1065,6 +1068,124 @@ get_Rookie_Metric_by_Recruited_month_v2 <- function(last_day_of_month, dbfile = 
   rookie_mertric
 }
 
+get_segmentation_by_genlion_sa_rookie <- function(business_date, dbfile = 'KPI_PRODUCTION/main_database.db') {
+  # excluded ter agents
+  genlion=get_Manpower_genlion(business_date, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) 
+  
+  # excluded ter agents
+  sa=get_Manpower_sa(business_date, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) 
+    
+  # excluded ter agents
+  mp = get_Manpower(business_date, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    # calculate different months between joining date and business date
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    # loại genlion
+    dplyr::filter(!AGENT_CODE %in% genlion$AGENT_CODE) %>% 
+    # loại sa
+    dplyr::filter(!AGENT_CODE %in% sa$AGENT_CODE)
+  
+  # Manpower_by_rookie_GENLION:Rookie in month
+  r1 = mp %>% 
+    dplyr::filter(substr(BUSSINESSDATE, 1, 7)==substr(JOINING_DATE, 1, 7) )
+  
+  # Manpower_by_rookie_GENLION:Rookie last month
+  r2 = mp %>% 
+    dplyr::filter(MDIFF==1)
+  
+  # Manpower_by_rookie_GENLION:2-3 months
+  r3 = mp %>% 
+    dplyr::filter(MDIFF %in% c(2:3))
+  
+  # Manpower_by_rookie_mdrt:4 - 6 mths
+  r4 = mp %>% 
+    dplyr::filter(MDIFF %in% c(4:6))
+  
+  # Manpower_by_rookie_GENLION:7-12mth
+  r5 = mp %>% 
+    dplyr::filter(MDIFF %in% c(7:12))
+  
+  # Manpower_by_rookie_GENLION:13+mth
+  r6 = mp %>% 
+    dplyr::filter(MDIFF >= 13)
+  
+  #  Recruit_by_designation:AG 
+  new_recuited_ag = r1 %>% 
+    dplyr::filter(AGENT_DESIGNATION=='AG')
+  
+  #  Recruit_by_designation:AG 
+  new_recuited_al = r1 %>% 
+    dplyr::filter(AGENT_DESIGNATION!='AG')
+  
+  # summary
+  rbind(
+  genlion %>% 
+    dplyr::group_by(territory = sprintf("GEN Lion %s", TERRITORY), time_view = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi="# Manpower_by_rookie_GENLION:MDRT/ GEN Lion (from Apr '17)") 
+  ,
+  sa %>% 
+    dplyr::group_by(territory = sprintf("GEN Lion %s", TERRITORY), time_view = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi="# Manpower_by_rookie_GENLION:SA") 
+  ,
+  r1 %>% 
+    dplyr::group_by(territory = sprintf("GEN Lion %s", TERRITORY), time_view = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi="# Manpower_by_rookie_GENLION:Rookie in month") 
+  ,
+  r2 %>% 
+    dplyr::group_by(territory = sprintf("GEN Lion %s", TERRITORY), time_view = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi="# Manpower_by_rookie_GENLION:Rookie last month") 
+  ,
+  r3 %>% 
+    dplyr::group_by(territory = sprintf("GEN Lion %s", TERRITORY), time_view = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi="# Manpower_by_rookie_GENLION:2-3 months") 
+  ,
+  r4 %>% 
+    dplyr::group_by(territory = sprintf("GEN Lion %s", TERRITORY), time_view = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi="# Manpower_by_rookie_GENLION:4 - 6 mths") 
+  ,
+  r5 %>% 
+    dplyr::group_by(territory = sprintf("GEN Lion %s", TERRITORY), time_view = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi="# Manpower_by_rookie_GENLION:7-12mth") 
+  ,
+  r6 %>% 
+    dplyr::group_by(territory = sprintf("GEN Lion %s", TERRITORY), time_view = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi="# Manpower_by_rookie_GENLION:13+mth") 
+  ,
+  new_recuited_ag %>% 
+    dplyr::group_by(territory = sprintf("GEN Lion %s", TERRITORY), time_view = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi="Recruit_by_designation:AG") 
+  ,
+   new_recuited_al %>% 
+    dplyr::group_by(territory = sprintf("GEN Lion %s", TERRITORY), time_view = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi="Recruit_AL") 
+  )
+}
 
 # MOVEMENT ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 promotion_movement_SUM_SBM <- function(business_dates, dbfile = 'KPI_PRODUCTION/main_database.db') {
@@ -1094,6 +1215,7 @@ promotion_movement_SUM_SBM <- function(business_dates, dbfile = 'KPI_PRODUCTION/
     dplyr::select(AGENT_CODE, TERRITORY) %>% 
     merge(x=., y=data, by.x='AGENT_CODE', by.y='AGENTCD')
 }
+
 demotion_movement_SUM_SBM <- function(business_dates, dbfile = 'KPI_PRODUCTION/main_database.db') {
   # business_dates = as.Date('2017-07-31')
   if(!inherits(business_dates, "Date")) {
@@ -1147,6 +1269,7 @@ promotion_movement_US_UM_BM <- function(business_dates, dbfile = 'KPI_PRODUCTION
   dbDisconnect(my_database$con)
   data
 }
+
 demotion_movement_US_UM_BM <- function(business_dates, dbfile = 'KPI_PRODUCTION/main_database.db') {
   # business_dates = as.Date('2017-07-31')
   if(!inherits(business_dates, "Date")) {
@@ -1172,6 +1295,61 @@ demotion_movement_US_UM_BM <- function(business_dates, dbfile = 'KPI_PRODUCTION/
   data
 }
 
+termination_movement <- function(business_dates, dbfile = 'KPI_PRODUCTION/main_database.db') {
+  # business_dates = as.Date('2017-07-31')
+  if(!inherits(business_dates, "Date")) {
+    message ("the param should be a Date type")
+    stop()
+  }
+  # my_database <- src_sqlite(dbfile, create = TRUE)
+  # SQL <- sprintf(
+  #   "SELECT A.AGENT_CODE, A.NEW_AGENT_DESIGNATION, B.TERRITORY, A.EFFECTIVE_FROM 
+  #   FROM RAWDATA_AGENTMOVEMENT A
+  #   JOIN RAWDATA_MAPPING_TERRITORY_REGION B ON A.OLD_REGION_CODE = B.REGION_CODE 
+  #   WHERE 
+  #   EFFECTIVE_FROM LIKE '%s'
+  #   AND UPPER(MOVEMENT_TYPE) = 'TERMINATION'
+  #   ", 
+  #   strftime(business_dates, '%Y-%m%'))
+  # result <- dbSendQuery(my_database$con, SQL)
+  # data = fetch(result, encoding="utf-8")
+  # dbClearResult(result)
+  # dbDisconnect(my_database$con)
+  # data
+  
+  get_Manpower(business_dates, T, dbfile) %>% 
+    dplyr::filter(AGENT_STATUS=='Terminated') %>% 
+    dplyr::filter(substr(BUSSINESSDATE, 1, 7)==substr(TERMINATION_DATE, 1, 7) )
+    
+}
+
+reinstatement_movement <- function(business_dates, dbfile = 'KPI_PRODUCTION/main_database.db') {
+  # business_dates = as.Date('2017-05-31')
+  if(!inherits(business_dates, "Date")) {
+    message ("the param should be a Date type")
+    stop()
+  }
+  # my_database <- src_sqlite(dbfile, create = TRUE)
+  # SQL <- sprintf(
+  #   "SELECT A.AGENT_CODE, A.NEW_AGENT_DESIGNATION, B.TERRITORY, A.EFFECTIVE_FROM 
+  #   FROM RAWDATA_AGENTMOVEMENT A
+  #   JOIN RAWDATA_MAPPING_TERRITORY_REGION B ON A.OLD_REGION_CODE = B.REGION_CODE 
+  #   WHERE 
+  #   EFFECTIVE_FROM LIKE '%s'
+  #   AND UPPER(MOVEMENT_TYPE) = 'TERMINATION'
+  #   ", 
+  #   strftime(business_dates, '%Y-%m%'))
+  # result <- dbSendQuery(my_database$con, SQL)
+  # data = fetch(result, encoding="utf-8")
+  # dbClearResult(result)
+  # dbDisconnect(my_database$con)
+  # data
+  
+  get_Manpower(business_dates, T, dbfile) %>% 
+    dplyr::filter(substr(BUSSINESSDATE, 1, 7)==substr(REINSTATEMENT_DATE, 1, 7) )
+    
+}
+
 promoted_AL <- function(business_dates, dbfile = 'KPI_PRODUCTION/main_database.db'){
   p1=promotion_movement_SUM_SBM(business_dates, dbfile) %>% 
     dplyr::group_by(territory = TERRITORY) %>% 
@@ -1190,6 +1368,7 @@ promoted_AL <- function(business_dates, dbfile = 'KPI_PRODUCTION/main_database.d
     dplyr::mutate(time_view = strftime(business_dates, '%Y%m')) %>% 
     dplyr::mutate(kpi='promoted_AL') 
 }
+
 demoted_AL <- function(business_dates, dbfile = 'KPI_PRODUCTION/main_database.db'){
   p1=demotion_movement_SUM_SBM(business_dates, dbfile) %>% 
     dplyr::group_by(territory = TERRITORY) %>% 
@@ -1208,6 +1387,21 @@ demoted_AL <- function(business_dates, dbfile = 'KPI_PRODUCTION/main_database.db
     dplyr::mutate(time_view = strftime(business_dates, '%Y%m')) %>% 
     dplyr::mutate(kpi='demoted_AL') 
 }
+
+terminated_agents <- function(business_dates, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  p1=termination_movement(business_dates, dbfile) %>% 
+    dplyr::group_by(territory = TERRITORY) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.) 
+  
+  p1 %>% 
+    dplyr::group_by(territory) %>% 
+    dplyr::summarise(value=sum(value))%>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(time_view = strftime(business_dates, '%Y%m')) %>% 
+    dplyr::mutate(kpi='terminated_agents') 
+}
+
 # RECRUIT -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #  New recruited AL
 new_recruited_AL <- function(business_dates, dbfile = 'KPI_PRODUCTION/main_database.db') {
@@ -1524,7 +1718,7 @@ replace_cellvalue2 <- function(North_results, sheetname, rowNameColIndex = 1, he
 
 replace_cellvalue2.1_set_cell_color <- function(df, sheetname, 
            rowNameColIndex, headerRowIndex, 
-           template, result_file, color="white") {
+           template, result_file, format_string='#,##0', color="white") {
     # each element in the df will be written to the excel sheet 
     # based on it colname and rowname
     wb = xlsx::loadWorkbook(template)
@@ -1565,7 +1759,7 @@ replace_cellvalue2.1_set_cell_color <- function(df, sheetname,
                   lapply(names(cells), function(x) { 
                     c = cells[[x]]
                     xlsx::setCellValue(c, v)
-                    dataFormat =  xlsx::DataFormat('#,##0') 
+                    dataFormat =  xlsx::DataFormat(format_string) 
                     cs = CellStyle.default(wb) + dataFormat + xlsx::Fill(foregroundColor=color, backgroundColor=color, pattern="SOLID_FOREGROUND")  
                     xlsx::setCellStyle(c, cs)
                   })
@@ -1575,7 +1769,7 @@ replace_cellvalue2.1_set_cell_color <- function(df, sheetname,
                     xlsx::setCellValue(c, v)
                     # cách này replace luôn fomula trong cell bằng v
                     # c[["Value"]] <- v
-                    dataFormat =  xlsx::DataFormat('#,##0') 
+                    dataFormat =  xlsx::DataFormat(format_string) 
                     cs = CellStyle.default(wb) + dataFormat + xlsx::Fill(foregroundColor=color, backgroundColor=color, pattern="SOLID_FOREGROUND")  
                     xlsx::setCellStyle(c, cs)
                   })
@@ -1800,8 +1994,8 @@ report_kpi_segmentation <- function(criteria='', dbfile = 'KPI_PRODUCTION/main_d
   sql = sprintf("select trim(kpi) as kpi, time_view, value from report_kpi_segmentation %s", criteria)
   result <- dbSendQuery(my_database$con, sql)
   data = fetch(result, encoding="utf-8")
-  dbClearResult(result)
-  dbDisconnect(my_database$con)
+  # dbClearResult(result)
+  # dbDisconnect(my_database$con)
   data
 }
 
@@ -2021,10 +2215,11 @@ import_kpiproduction_msaccess <- function(tablenames=NA, accessdb="KPI_PRODUCTIO
 # RDCOMClient utils -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 RDCOMClient_replace_cellvalues <- function(df, excelfile, newexcelfile, sheetname, visible, rowNameColIndex, headerRowIndex) {
   ############################
-  # excelfile="D:/DOM/DIEM/SP 18-22/1.0. GVL Agency Sales Plan_2018 2022_working file (July 2017)_Tung_updated.xlsx"
-  # newexcelfile = sprintf("D:/DOM/DIEM/SP 18-22/1.0. GVL Agency Sales Plan_2018 2022_working file (July 2017)_Tung_updated_%s.xlsx", strftime(Sys.time(),'%y%m%d'))
+  # df=df
+  # excelfile=excelFile
+  # newexcelfile = excelFile
   # sheetname="Agency North"
-  # visible=T
+  # visible=F
   # rowNameColIndex=1
   # headerRowIndex=1
   ############################
@@ -2071,6 +2266,7 @@ RDCOMClient_replace_cellvalues <- function(df, excelfile, newexcelfile, sheetnam
     # error-handler-code
     print(rowidx_val)
     print(colidx_val)
+    stop()
     # print(sprintf(sql, 
     #               tbname, 
     #               paste(names(df), collapse = ","),
