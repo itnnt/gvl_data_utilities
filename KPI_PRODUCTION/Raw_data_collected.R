@@ -291,9 +291,36 @@ if(interactive()) {
   import_agentlist_from_msaccess("20170531", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201705/KPI_PRODUCTION_20170531.accdb")
   import_agentlist_from_msaccess("20170630", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201706/KPI_PRODUCTION_20170630.accdb")
   import_agentlist_from_msaccess("20170731", accessdb="d:/Data/DA_201707/KPI_PRODUCTION.accdb")
-  import_kpiproduction_msaccess(c('KPITotal','Manpower_Active Ratio'), accessdb="d:/Data/DA_201707/KPI_PRODUCTION.accdb")
-  import_kpiproduction_msaccess(c('AgentMovement'), accessdb="d:/Data/DA_201707/KPI_PRODUCTION.accdb")
-  import_kpiproduction_msaccess(c('Promotion_Demotion_SBM_SUM'), accessdb="d:/Data/DA_201707/KPI_PRODUCTION.accdb")
+  import_agentlist_from_msaccess("20170831", accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
+  
+  import_kpiproduction_msaccess_GENLION_REPORT("20170430", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201704/KPI_PRODUCTION_20170430.accdb")
+  import_kpiproduction_msaccess_GENLION_REPORT("20170531", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201705/KPI_PRODUCTION_20170531.accdb")
+  import_kpiproduction_msaccess_GENLION_REPORT('20170630', accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201706/KPI_PRODUCTION_20170630.accdb")
+  
+  import_kpiproduction_msaccess(c('KPITotal','Manpower_Active Ratio'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('AgentMovement'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('Promotion_Demotion_SBM_SUM'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('Persistency'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('Persistency_Y2'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess_GENLION_REPORT('20170831', accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
+  
+  # import_kpiproduction_msaccess(c('GATotal'), accessdb="d:/Data/DA_201707/KPI_PRODUCTION.accdb")
+  GATotal <- read_excel("d:\\Data\\DA_201708\\GATotal.xlsx")
+  fieldnames <- names(GATotal) # get all field names in the result
+  fieldnames <- gsub(' ', '_', fieldnames) # replace all special characters in the fieldnames by '_'
+  fieldnames <- gsub('%', '', fieldnames) # replace all special characters in the fieldnames by '_'
+  fieldnames <- gsub('&', '', fieldnames) # replace all special characters in the fieldnames by '_'
+  names(GATotal) <- toupper(fieldnames) # rename all fields in the result
+  insert_or_replace_bulk(GATotal, 'RAWDATA_GATotal', dbfile = 'D:\\workspace_data_processing\\gvl_data_utilities\\KPI_PRODUCTION\\main_database.db') # save to database
+
+  ADLIST <- read_excel("d:\\Data\\DA_201708\\ADLIST.xlsx")
+  fieldnames <- names(ADLIST) # get all field names in the result
+  fieldnames <- gsub(' ', '_', fieldnames) # replace all special characters in the fieldnames by '_'
+  fieldnames <- gsub('%', '', fieldnames) # replace all special characters in the fieldnames by '_'
+  fieldnames <- gsub('&', '', fieldnames) # replace all special characters in the fieldnames by '_'
+  names(ADLIST) <- toupper(fieldnames) # rename all fields in the result
+  insert_or_replaceall(ADLIST, 'RAWDATA_ADLIST', dbfile = 'D:\\workspace_data_processing\\gvl_data_utilities\\KPI_PRODUCTION\\main_database.db') # save to database
+  
 }
 RODBC::odbcCloseAll()
 
