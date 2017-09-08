@@ -302,6 +302,8 @@ if(interactive()) {
   import_kpiproduction_msaccess(c('Promotion_Demotion_SBM_SUM'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
   import_kpiproduction_msaccess(c('Persistency'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
   import_kpiproduction_msaccess(c('Persistency_Y2'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('Product','Product_SME'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
+  
   import_kpiproduction_msaccess_GENLION_REPORT('20170831', accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
   
   # import_kpiproduction_msaccess(c('GATotal'), accessdb="d:/Data/DA_201707/KPI_PRODUCTION.accdb")

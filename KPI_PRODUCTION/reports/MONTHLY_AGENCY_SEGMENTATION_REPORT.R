@@ -9,10 +9,12 @@ source('KPI_PRODUCTION/Common functions.R')
 # ---
 #
 update_kpi_segmentation <- function() {
-  bssdt = as.Date('2017-07-31')
+  bssdt = as.Date('2017-08-31')
   genlion_final_dt = as.Date('2017-03-31')
+  # theo y Chau lay genlion cuoi thang 6: 2017-06-30
+  genlion_final_dt = as.Date('2017-06-30')
   #----
-  get_Rookie_Performance(bssdt) %>%  dplyr::mutate(level='REGION') %>% insert_or_replace_bulk(., 'kpi_segmentation')
+  get_Rookie_Performance(bssdt) %>%  dplyr::mutate(level='TERRITORY') %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #----
   Case_per_Active(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #----
@@ -20,7 +22,8 @@ update_kpi_segmentation <- function() {
   #----
   CaseSize(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #----
-  Activity_Ratio(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
+  # Activity_Ratio(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
+  Activity_Ratio_1.1(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #----
   Active(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #----
@@ -33,7 +36,10 @@ update_kpi_segmentation <- function() {
   Ending_MP(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #----
   Manpower(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
-  
+  #---
+  product_mix_calculation(fromdt = as.Date('2016-01-01'), bssdt) %>% insert_or_replace_bulk(., 'product_mix')
+  #---
+  agent_retention(bssdt) %>% insert_or_replace_bulk(., 'report_agent_retention')
 }
 
 #
@@ -52,7 +58,7 @@ t1[,'territory']='NORTH'
 # t1[,'yy']=sub(".*(\\d+{2}).*$", "\\1", t1$time_view) # left 2 characters
 t1[,'yy']=sub("(^\\d{4}).*", "\\1", t1$time_view) # get the left 4 chars
 t1 = dplyr::filter(t1, !is.na(value)) %>% 
-     dplyr::mutate(level='REGION')
+     dplyr::mutate(level='TERRITORY')
 insert_or_replace_bulk(t1, 'kpi_segmentation') # save to database
 
 
@@ -69,7 +75,7 @@ t1[,'territory']='SOUTH'
 # t1[,'yy']=sub(".*(\\d+{2}).*$", "\\1", t1$time_view) # left 2 characters
 t1[,'yy']=sub("(^\\d{4}).*", "\\1", t1$time_view) # get the left 4 chars
 t1 = dplyr::filter(t1, !is.na(value))%>% 
-     dplyr::mutate(level='REGION')
+     dplyr::mutate(level='TERRITORY')
 insert_or_replace_bulk(t1, 'kpi_segmentation') # save to database
 
 
@@ -87,7 +93,7 @@ t1[,'territory']='NORTH'
 t1 <- t1[!is.na(t1$value),] # remove na values from t1
 t1[,'yy']=sub("(^\\d{4}).*", "\\1", t1$time_view) # get the left 4 chars
 t1 = t1 %>% 
-  dplyr::mutate(level='REGION')
+  dplyr::mutate(level='TERRITORY')
 insert_or_replace_bulk(t1, 'kpi_segmentation')
 
 
@@ -105,7 +111,7 @@ t1[,'territory']='SOUTH'
 t1 <- t1[!is.na(t1$value),] # remove na values from t1
 t1[,'yy']=sub("(^\\d{4}).*", "\\1", t1$time_view) # get the left 4 chars
 t1 = t1%>% 
-  dplyr::mutate(level='REGION')
+  dplyr::mutate(level='TERRITORY')
 insert_or_replace_bulk(t1, 'kpi_segmentation')
 
 df <-read_excel(exceldatafile, 
@@ -140,26 +146,16 @@ t1 = dplyr::filter(t1, !is.na(value))
 insert_or_replace_bulk(t1, 'product_mix') # save to database
 
 
-#
-# end segment -------------------------------------------------------------
-#
-
 
 #
 # update data -------------------------------------------------------------
 #
 for (bsdt in generate_last_day_of_month(2015)) {
-  rs <- active_recruit_leader(as.Date(bsdt)) %>% dplyr::mutate(level='REGION') %>% # active recruit leader: us, um, bm
+  rs <- active_recruit_leader(as.Date(bsdt)) %>% dplyr::mutate(level='TERRITORY') %>% # active recruit leader: us, um, bm
   insert_or_replace_bulk(., 'kpi_segmentation')
 }
 
 
-
-# get_Manpower(as.Date('2017-07-31')) %>% 
-#   dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, FORMAT_BUSSINESSDATE))) %>% 
-#   dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, FORMAT_BUSSINESSDATE)))
-#   
-# end segment -------------------------------------------------------------
 
 
 #
@@ -173,7 +169,7 @@ create_report <- function (bssdt){
   # sheet North -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   #
   
-  t2=kpi_segmentation(criteria = "where territory='NORTH' and level='REGION'")
+  t2=kpi_segmentation(criteria = "where territory='NORTH' and level='TERRITORY'")
   # t2[,'value'] <- as.numeric(t2[,'value'],)
   t3=tidyr::spread(t2, time_view, value)
   # set rownames equal to column1: trim leading and trailing whitespace (left trim, right trim) 
@@ -199,7 +195,7 @@ create_report <- function (bssdt){
   # sheet South -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   #
   
-  t2=kpi_segmentation(criteria = "where territory='SOUTH' and level='REGION'")
+  t2=kpi_segmentation(criteria = "where territory='SOUTH' and level='TERRITORY'")
   # t2[,'value'] <- as.numeric(t2[,'value'],)
   t3=tidyr::spread(t2, time_view, value)
   # set rownames equal to column1
@@ -244,20 +240,68 @@ create_report <- function (bssdt){
   #   headerRowIndex=1
   # )
   
-  # update product_mix -------------------------------------------------------------
-  t2=product_mix(criteria = "")
-  # t2[,'value'] <- as.numeric(t2[,'value'],)
-  t3=tidyr::spread(t2, time_view, value)
-  t3=t3[order(t3$Total, decreasing = T),]
-  # set rownames equal to column1: trim leading and trailing whitespace (left trim, right trim) 
-  rownames(t3)<-gsub("^\\s+|\\s+$", "", t3[,'product_code'])
+  # Product_mix -------------------------------------------------------------
+  t1 = product_mix(criteria = "WHERE product_code not in ('RIDER', 'SME')", orderby = strftime(bssdt, '%Y')  ,addTotalRow = T)
+  fill_excel_column1.3(
+    df=t1 %>% dplyr::filter(product_code != 'Basic Total'),
+    sheetname="Product Mix",
+    rowNameColIndex = 1,
+    headerRowIndex = 1,
+    start_writing_from_row = 8,
+    template=excelFile,
+    result_file=excelFile
+  )
   
-  replace_cellvalue2.1(t3,
-                       sheetname="Product Mix",
-                       rowNameColIndex = 1,
-                       headerRowIndex = 1,
-                       template=excelFile,
-                       result_file=excelFile)
+  t2=rbind(
+    t1 %>% dplyr::filter(product_code == 'Basic Total'),
+    product_mix(criteria = "WHERE product_code in ('RIDER', 'SME')", orderby = strftime(bssdt, '%Y'))
+  )
+  t2$product_name=''
+  fill_excel_column1.3(
+    df=t2,
+    sheetname="Product Mix",
+    rowNameColIndex = 1,
+    headerRowIndex = 1,
+    start_writing_from_row = 8+nrow(t1),
+    template=excelFile,
+    result_file=excelFile,
+    '#00CCFF'
+  )
+  fill_excel_column1.3(
+    df=(
+      tidyr::gather(t2, time_view, value, -product_code, -product_name, -fmt) %>% 
+        dplyr::group_by(time_view, fmt) %>% 
+        dplyr::summarise(value=sum(value, na.rm = T)) %>% 
+        dplyr::mutate(product_code='Grand Total') %>% 
+        dplyr::mutate(product_name='') %>% 
+        tidyr::spread(., time_view, value)
+    ),
+    sheetname="Product Mix",
+    rowNameColIndex = 1,
+    headerRowIndex = 1,
+    start_writing_from_row = 8+nrow(t1)+nrow(t2),
+    template=excelFile,
+    result_file=excelFile,
+    '#993366'
+  )
+  
+  t3 = kpi_segmentation(criteria = "where kpi='APE_by_rookie_mdrt:Total' and level='TERRITORY'") %>% 
+    dplyr::group_by(time_view) %>% 
+    dplyr::summarise(value=sum(value)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(product_code='APE (bil)', fmt='#,##0') %>% 
+    tidyr::spread(., time_view, value) %>% 
+    dplyr::mutate(product_name='') %>% 
+    fill_excel_column1.3(
+      df=.,
+      sheetname="Product Mix",
+      rowNameColIndex = 1,
+      headerRowIndex = 1,
+      start_writing_from_row = 8+nrow(t1)+nrow(t2)+1,
+      template=excelFile,
+      result_file=excelFile,
+      '#CC99FF'
+    )
   
   # GA performance ----------------------------------------------------------------
   GA_per = GA(bssdt)
@@ -284,39 +328,11 @@ create_report <- function (bssdt){
     template=excelFile,
     result_file=excelFile
   )
-  # RDCOMClient_fill_excel_column(
-  #   df=BD_per,
-  #   excelfile=excelFile,
-  #   newexcelfile = excelFile,
-  #   sheetname="BD",
-  #   visible=F,
-  #   rowNameColIndex=1,
-  #   headerRowIndex=1,
-  #   start_writing_from_row = 9
-  # )
+ 
   
 # Rookie Metric -----------------------------------------------------------
  
-  # apply-like function that returns a data frame
-  # recruit <- do.call(rbind,lapply(generate_last_day_of_month(2017), function(d) {
-  #   get_Manpower(d, included_ter_ag = T)
-  # })
-  # )
-  
-    
-  # recruit = get_Manpower(bssdt, included_ter_ag = T) %>% 
-  #   dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
-  #   dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
-  #   # calculate different months between joining date and business date
-  #   dplyr::mutate(MDIFF = as.integer(round((as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)) * 12))) %>% 
-  #   dplyr::filter(MDIFF == 0) # new recuit %>% 
-  #   dplyr::group_by(territory=TERRITORY, time_view=strftime(BUSSINESSDATE,'%Y%m')) %>% 
-  #   dplyr::summarise(value=n()) %>% 
-  #   # tidyr::spread(., BUSSINESSDATE, value) %>% 
-  #   dplyr::mutate(kpi='recruit')  %>% 
-  #   dplyr::mutate(idx=1)
-  
-  recruit = kpi_segmentation(criteria = "where kpi='# Manpower_by_rookie_mdrt:Rookie in month' and level='REGION'") %>% 
+  recruit = kpi_segmentation(criteria = "where kpi='# Manpower_by_rookie_mdrt:Rookie in month' and level='TERRITORY'") %>% 
     dplyr::mutate(idx=1) %>% 
     dplyr::mutate(kpi='recruit')
   recruit_country = recruit %>% 
@@ -441,105 +457,15 @@ create_report <- function (bssdt){
   )
   
   # Ending MP_Structure -----------------------------------------------------
-  total = kpi_segmentation(criteria = "where kpi='# Manpower_by_designation:Total' and level='REGION' ") %>% 
-    dplyr::mutate(idx=1) %>% 
-    dplyr::mutate(kpi='Ending Manpower_Total')
-  total_excl_sa = kpi_segmentation(criteria = "where kpi='# Manpower_by_designation:Total (excl. SA)' and level='REGION' ") %>% 
-    dplyr::mutate(idx=2) %>% 
-    dplyr::mutate(kpi='Ending Manpower_ExSA')
-  sa = kpi_segmentation(criteria = "where kpi='# Manpower_by_designation:SA' and level='REGION' ") %>% 
-    dplyr::mutate(idx=3) %>% 
-    dplyr::mutate(kpi='# SA')
-  ag = kpi_segmentation(criteria = "where kpi='# Manpower_by_designation:AG' and level='REGION' ") %>% 
-    dplyr::mutate(idx=4) %>% 
-    dplyr::mutate(kpi='# AG')
-  us = kpi_segmentation(criteria = "where kpi='# Manpower_by_designation:US' and level='REGION' ") %>% 
-    dplyr::mutate(idx=5) %>% 
-    dplyr::mutate(kpi='# US')
-  um = kpi_segmentation(criteria = "where kpi='# Manpower_by_designation:UM' and level='REGION' ") %>% 
-    dplyr::mutate(idx=6) %>% 
-    dplyr::mutate(kpi='# US')
-  sum = kpi_segmentation(criteria = "where kpi='# Manpower_by_designation:SUM' and level='REGION' ") %>% 
-    dplyr::mutate(idx=7) %>% 
-    dplyr::mutate(kpi='# SUM')
-  bm = kpi_segmentation(criteria = "where kpi='# Manpower_by_designation:BM' and level='REGION' ") %>% 
-    dplyr::mutate(idx=8) %>% 
-    dplyr::mutate(kpi='# BM')
-  sbm = kpi_segmentation(criteria = "where kpi='# Manpower_by_designation:SBM' and level='REGION' ") %>% 
-    dplyr::mutate(idx=9) %>% 
-    dplyr::mutate(kpi='# SBM')
-  
-  mp_group_by_territory = rbind(
-    total, total %>% 
-            dplyr::filter(., as.numeric(substr(time_view, 5,6)) <= month(bssdt)) %>% # filter data for ytd calculation
-            dplyr::group_by(time_view=substr(time_view, 1, 4), territory, kpi, idx) %>% 
-            dplyr::summarise(value=sum(value)) %>% 
-            dplyr::ungroup(.)
-    
-    ,
-    total_excl_sa, total_excl_sa %>% 
-                    dplyr::filter(., as.numeric(substr(time_view, 5,6)) <= month(bssdt)) %>% # filter data for ytd calculation
-                    dplyr::group_by(time_view=substr(time_view, 1, 4), territory, kpi, idx) %>% 
-                    dplyr::summarise(value=sum(value)) %>% 
-                    dplyr::ungroup(.)
-    
-    ,
-    sa, sa %>% 
-        dplyr::filter(., as.numeric(substr(time_view, 5,6)) <= month(bssdt)) %>% # filter data for ytd calculation
-        dplyr::group_by(time_view=substr(time_view, 1, 4), territory, kpi, idx) %>% 
-        dplyr::summarise(value=sum(value)) %>% 
-        dplyr::ungroup(.)
-    ,
-    ag, ag %>% 
-        dplyr::filter(., as.numeric(substr(time_view, 5,6)) <= month(bssdt)) %>% # filter data for ytd calculation
-        dplyr::group_by(time_view=substr(time_view, 1, 4), territory, kpi, idx) %>% 
-        dplyr::summarise(value=sum(value)) %>% 
-        dplyr::ungroup(.)
-    
-    ,
-    us, us %>% 
-        dplyr::filter(., as.numeric(substr(time_view, 5,6)) <= month(bssdt)) %>% # filter data for ytd calculation
-        dplyr::group_by(time_view=substr(time_view, 1, 4), territory, kpi, idx) %>% 
-        dplyr::summarise(value=sum(value)) %>% 
-        dplyr::ungroup(.)
-    
-    ,
-    um, um %>% 
-        dplyr::filter(., as.numeric(substr(time_view, 5,6)) <= month(bssdt)) %>% # filter data for ytd calculation
-        dplyr::group_by(time_view=substr(time_view, 1, 4), territory, kpi, idx) %>% 
-        dplyr::summarise(value=sum(value)) %>% 
-        dplyr::ungroup(.)
-    
-    ,
-    sum, sum %>% 
-          dplyr::filter(., as.numeric(substr(time_view, 5,6)) <= month(bssdt)) %>% # filter data for ytd calculation
-          dplyr::group_by(time_view=substr(time_view, 1, 4), territory, kpi, idx) %>% 
-          dplyr::summarise(value=sum(value)) %>% 
-          dplyr::ungroup(.)
-    ,
-    bm, bm %>% 
-        dplyr::filter(., as.numeric(substr(time_view, 5,6)) <= month(bssdt)) %>% # filter data for ytd calculation
-        dplyr::group_by(time_view=substr(time_view, 1, 4), territory, kpi, idx) %>% 
-        dplyr::summarise(value=sum(value)) %>% 
-        dplyr::ungroup(.)
-   
-    ,
-    sbm, sbm %>% 
-          dplyr::filter(., as.numeric(substr(time_view, 5,6)) <= month(bssdt)) %>% # filter data for ytd calculation
-          dplyr::group_by(time_view=substr(time_view, 1, 4), territory, kpi, idx) %>% 
-          dplyr::summarise(value=sum(value)) %>% 
-          dplyr::ungroup(.)
-    
-  ) 
+  write_from = 4
+  mp_group_by_territory = Ending_MP_Structure(bssdt) 
   
   mp = mp_group_by_territory %>% 
-    tidyr::spread(., time_view, value)
-  
-  mp %>% 
-    dplyr::mutate(level='TERRITORY', province='', region='', zone='', name=territory) %>% 
-    dplyr::arrange(., territory, idx) %>% 
-    fill_excel_column1.2(
-      df=.,
+    tidyr::spread(., time_view, value) %>% 
+    dplyr::mutate(level='TERRITORY', province='', region='', zone='', name=territory, fmt='#,##0') %>% 
+    dplyr::arrange(., territory, idx)
+  write_from = fill_excel_column1.3(
+      df=mp,
       sheetname="Ending MP_Structure",
       rowNameColIndex = 1,
       headerRowIndex = 1,
@@ -549,41 +475,58 @@ create_report <- function (bssdt){
       "#CCFFFF"
     )
   # country
-  mp_group_by_territory %>% dplyr::group_by(time_view, kpi, idx) %>% 
+  tempdt = mp_group_by_territory %>% dplyr::group_by(time_view, kpi, idx) %>% 
     dplyr::summarise(value=sum(value)) %>% 
     dplyr::ungroup(.) %>% 
     tidyr::spread(., time_view, value) %>% 
-    dplyr::mutate(level='COUNTRY', province='', region='', zone='', name='', territory='') %>% 
-    dplyr::arrange(., idx) %>% 
-    fill_excel_column1.2(
-      df=.,
+    dplyr::mutate(level='COUNTRY', province='', region='', zone='', name='', territory='', fmt='#,##0') %>% 
+    dplyr::arrange(., idx)
+  
+  write_from = fill_excel_column1.3(
+      df=tempdt,
       sheetname="Ending MP_Structure",
       rowNameColIndex = 1,
       headerRowIndex = 1,
-      start_writing_from_row = 4+nrow(mp),
+      start_writing_from_row = write_from,
       template=excelFile,
       result_file=excelFile,
       "#00CCFF"
     )
   
   # Production_AD Structure -------------------------------------------------
-  data_group_by_territory = Production_AD_Structure_REGION(bssdt)
+  write_from = 4
+  # prd_ad_re = Production_AD_Structure_REGION(bssdt) %>% 
+  #   tidyr::spread(.,time_view, value) %>% 
+  #   dplyr::mutate(province='', zone='', name=territory) %>% 
+  #   dplyr::arrange(., territory, idx)
+  # 
+  # write_from = fill_excel_column1.3(
+  #     df=prd_ad_re,
+  #     sheetname="Production_AD Structure",
+  #     rowNameColIndex = 1,
+  #     headerRowIndex = 1,
+  #     start_writing_from_row = write_from,
+  #     template=excelFile,
+  #     result_file=excelFile,
+  #     "#FFFF99"
+  #   )
   
   #
   # Production_AD Structure: territory
   # 
+  data_group_by_territory = Production_AD_Structure_TERRITORY(bssdt)
   dt1 = data_group_by_territory %>% 
-    tidyr::spread(., time_view, value)
-  dt1 %>% 
+    tidyr::spread(., time_view, value) %>% 
     dplyr::mutate(level='TERRITORY') %>% 
     dplyr::mutate(province='', region='', zone='', name=territory) %>% 
-    dplyr::arrange(., territory, idx) %>% 
-    fill_excel_column1.3(
-      df=.,
+    dplyr::arrange(., territory, idx) 
+    
+  write_from =  fill_excel_column1.3(
+      df=dt1,
       sheetname="Production_AD Structure",
       rowNameColIndex = 1,
       headerRowIndex = 1,
-      start_writing_from_row = 4,
+      start_writing_from_row = write_from,
       template=excelFile,
       result_file=excelFile,
       "#CCFFFF"
@@ -591,18 +534,19 @@ create_report <- function (bssdt){
   # 
   # Production_AD Structure: country
   #
-  Production_AD_Structure_COUNTRY(bssdt) %>% 
+  temdf = Production_AD_Structure_COUNTRY(bssdt) %>% 
     dplyr::group_by(time_view, kpi, idx, fmt) %>% dplyr::summarise(value=sum(value)) %>% 
     dplyr::ungroup(.) %>% 
     tidyr::spread(., time_view, value) %>% 
     dplyr::mutate(level='COUNTRY', province='', region='', zone='', name='', territory='') %>% 
-    dplyr::arrange(., idx) %>% 
-    fill_excel_column1.3(
-      df=.,
+    dplyr::arrange(., idx) 
+  
+  write_from = fill_excel_column1.3(
+      df=temdf,
       sheetname="Production_AD Structure",
       rowNameColIndex = 1,
       headerRowIndex = 1,
-      start_writing_from_row = 4+nrow(dt1),
+      start_writing_from_row = write_from,
       template=excelFile,
       result_file=excelFile,
       "#00CCFF"
@@ -641,7 +585,26 @@ create_report <- function (bssdt){
       result_file=excelFile,
       "#00CCFF"
     )
+  
+  # Recruitment KPI_Structure -----------------------------------------------
+  write_from = 4
+  tem = Recruitment_KPI_Structure_TERRITORY(bssdt) %>% 
+    tidyr::spread(time_view, value) %>% 
+    dplyr::arrange(territory, idx) %>% 
+    dplyr::mutate(province='', region='', zone='', name='')
+  write_from =  fill_excel_column1.3(
+    df=tem,
+    sheetname="Recruitment KPI_Structure",
+    rowNameColIndex = 1,
+    headerRowIndex = 1,
+    start_writing_from_row = write_from,
+    template=excelFile,
+    result_file=excelFile,
+    "#CCFFFF"
+  )
 }
+
+
 
 
 
