@@ -10,7 +10,7 @@ source('KPI_PRODUCTION/Common functions.R')
 #
 update_kpi_segmentation <- function() {
   bssdt = as.Date('2017-08-31')
-  genlion_final_dt = as.Date('2017-03-31')
+  # genlion_final_dt = as.Date('2017-03-31')
   # theo y Chau lay genlion cuoi thang 6: 2017-06-30
   genlion_final_dt = as.Date('2017-06-30')
   #----
@@ -21,9 +21,10 @@ update_kpi_segmentation <- function() {
   Case(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #----
   CaseSize(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
-  #----
+  # Activity_Ratio_1.1---
   # Activity_Ratio(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   Activity_Ratio_1.1(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
+  Activity_Ratio_1.2(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #----
   Active(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #----
@@ -33,13 +34,21 @@ update_kpi_segmentation <- function() {
   #----
   RYP(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #----
+  FYP(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
+  #----
   Ending_MP(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #----
   Manpower(bssdt, genlion_final_dt) %>% insert_or_replace_bulk(., 'kpi_segmentation')
   #---
   product_mix_calculation(fromdt = as.Date('2016-01-01'), bssdt) %>% insert_or_replace_bulk(., 'product_mix')
   #---
-  agent_retention(bssdt) %>% insert_or_replace_bulk(., 'report_agent_retention')
+  agent_retention(bssdt) %>% dplyr::mutate(territory='') %>%  insert_or_replace_bulk(., 'report_agent_retention')
+  #---
+  Rider(bssdt) %>%  insert_or_replace_bulk(., 'kpi_segmentation')
+}
+
+for (bsdt in generate_last_day_of_month(2017)) {
+  Rider(as.Date(bsdt)) %>%  insert_or_replace_bulk(., 'kpi_segmentation')
 }
 
 #
@@ -158,12 +167,29 @@ for (bsdt in generate_last_day_of_month(2015)) {
 
 
 
+
+
 #
 # create report -----------------------------------------------------------
 #
 create_report <- function (bssdt){
   excelFile = sprintf("d:\\workspace_excel\\GVL\\DOMS\\Agency Monthly Report\\MONTHLY_AGENCY_SEGMENTATION_REPORT_%s.xlsx", strftime(Sys.time(),'%Y-%m-%d'))
   exceltemplate = "d:\\workspace_excel\\GVL\\DOMS\\Agency Monthly Report\\template_MONTHLY_AGENCY_SEGMENTATION_REPORT.xlsx"
+  
+  # Sheet Country -----------------------------------------------------------
+  sheetname = 'Country'
+  t2=kpi_segmentation(criteria = "where territory='COUNTRY' and level='COUNTRY'")
+  # t2[,'value'] <- as.numeric(t2[,'value'],)
+  t3=tidyr::spread(t2, time_view, value)
+  # set rownames equal to column1: trim leading and trailing whitespace (left trim, right trim) 
+  rownames(t3)<-gsub("^\\s+|\\s+$", "", t3[,'kpi'])
+  
+  replace_cellvalue2.1(t3,
+                       sheetname=sheetname,
+                       rowNameColIndex = 1,
+                       headerRowIndex = 1,
+                       template=exceltemplate,
+                       result_file=excelFile)
   
   # 
   # sheet North -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -179,17 +205,9 @@ create_report <- function (bssdt){
                        sheetname="North",
                        rowNameColIndex = 1,
                        headerRowIndex = 1,
-                       template=exceltemplate,
+                       template=excelFile,
                        result_file=excelFile)
   
-  # RDCOMClient_replace_cellvalues(df=t3,
-  #                                excelfile=exceltemplate,
-  #                                newexcelfile=excelFile,
-  #                                sheetname='North', 
-  #                                visible=F, 
-  #                                rowNameColIndex=1, 
-  #                                headerRowIndex=1
-  # )
   
   #
   # sheet South -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -208,14 +226,6 @@ create_report <- function (bssdt){
                        template=excelFile,
                        result_file=excelFile)
  
-  # RDCOMClient_replace_cellvalues(df=t3,
-  #                                excelfile=excelFile,
-  #                                newexcelfile=excelFile,
-  #                                sheetname='South', 
-  #                                visible=F, 
-  #                                rowNameColIndex=1, 
-  #                                headerRowIndex=1
-  #                                )
   
   # 5.0 AG retention --------------------------------------------------------
   df=report_agent_retention(criteria = "where value!=0 and value is not null")
@@ -305,7 +315,7 @@ create_report <- function (bssdt){
   
   # GA performance ----------------------------------------------------------------
   GA_per = GA(bssdt)
-  GA_per = GA_per[order(GA_per$`201707_APE`, decreasing = T),]
+  GA_per = GA_per[order(GA_per[sprintf('%s_APE', strftime(bssdt, '%Y%m'))], decreasing = T),]
   fill_excel_column1(
     df=GA_per,
     sheetname="GA",
@@ -425,7 +435,7 @@ create_report <- function (bssdt){
     start_writing_from_row = 4,
     template=excelFile,
     result_file=excelFile,
-    "#CCFFFF"
+    color_territory
   )
   
   dt_country = rbind(
@@ -472,7 +482,7 @@ create_report <- function (bssdt){
       start_writing_from_row = 4,
       template=excelFile,
       result_file=excelFile,
-      "#CCFFFF"
+      color_territory
     )
   # country
   tempdt = mp_group_by_territory %>% dplyr::group_by(time_view, kpi, idx) %>% 
@@ -529,7 +539,7 @@ create_report <- function (bssdt){
       start_writing_from_row = write_from,
       template=excelFile,
       result_file=excelFile,
-      "#CCFFFF"
+      color_territory
     )
   # 
   # Production_AD Structure: country
@@ -566,7 +576,7 @@ create_report <- function (bssdt){
       start_writing_from_row = 4,
       template=excelFile,
       result_file=excelFile,
-      "#CCFFFF"
+      color_territory
     )
   # group by country
   Recruitment_Structure_REGION(bssdt) %>% 
@@ -600,7 +610,34 @@ create_report <- function (bssdt){
     start_writing_from_row = write_from,
     template=excelFile,
     result_file=excelFile,
-    "#CCFFFF"
+    color_territory
+  )
+  tem = Recruitment_KPI_Structure_COUNTRY(bssdt) %>% 
+    tidyr::spread(time_view, value) %>% 
+    dplyr::arrange(idx) %>% 
+    dplyr::mutate(province='', region='', zone='', name='', territory='')
+  write_from =  fill_excel_column1.3(
+    df=tem,
+    sheetname="Recruitment KPI_Structure",
+    rowNameColIndex = 1,
+    headerRowIndex = 1,
+    start_writing_from_row = write_from,
+    template=excelFile,
+    result_file=excelFile,
+    "#00CCFF"
+  )
+  # Rider sheet -------------------------------------------------------------
+  write_from = 4
+  dt = Rider_sheet()
+  
+  write_from = fill_excel_column1.4(
+    df=dt,
+    sheetname="Rider",
+    rowNameColIndex = 1,
+    headerRowIndex = 1,
+    start_writing_from_row = write_from,
+    template=excelFile,
+    result_file=excelFile
   )
 }
 
@@ -614,10 +651,12 @@ create_report <- function (bssdt){
 
 
 
-create_report(as.Date('2017-08-31'))
-rm(list=ls())
 
+# MAIN PROCESS ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+if(interactive()) {
+  create_report(as.Date('2017-08-31'))
+  rm(list=ls())
+}
 
-# end segment -------------------------------------------------------------
 
 

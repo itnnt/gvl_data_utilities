@@ -315,11 +315,12 @@ if(interactive()) {
   names(GATotal) <- toupper(fieldnames) # rename all fields in the result
   insert_or_replace_bulk(GATotal, 'RAWDATA_GATotal', dbfile = 'D:\\workspace_data_processing\\gvl_data_utilities\\KPI_PRODUCTION\\main_database.db') # save to database
 
-  ADLIST <- read_excel("d:\\Data\\DA_201708\\ADLIST.xlsx")
+  ADLIST <- read_excel("t:\\AGY\\AA\\Data daily extract from EDM\\Backup\\201708\\20170831\\ADList.xls")
   fieldnames <- names(ADLIST) # get all field names in the result
   fieldnames <- gsub(' ', '_', fieldnames) # replace all special characters in the fieldnames by '_'
   fieldnames <- gsub('%', '', fieldnames) # replace all special characters in the fieldnames by '_'
   fieldnames <- gsub('&', '', fieldnames) # replace all special characters in the fieldnames by '_'
+  fieldnames <- gsub("[\r\n]", "", fieldnames)
   names(ADLIST) <- toupper(fieldnames) # rename all fields in the result
   insert_or_replaceall(ADLIST, 'RAWDATA_ADLIST', dbfile = 'D:\\workspace_data_processing\\gvl_data_utilities\\KPI_PRODUCTION\\main_database.db') # save to database
   
