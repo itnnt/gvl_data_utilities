@@ -70,15 +70,16 @@ import_agent_list <- function(range='A6:DA', dbfile = 'KPI_PRODUCTION/main_datab
 }
 
 import_mdrt <- function() {
-  dta <- read_excel("D:/workspace_r/gvl_data_utilities/KPI_PRODUCTION/input/MDRT.xlsx")
+  my_database<- src_sqlite(dbfile, create = TRUE)
+  dta <- read_excel("D:/workspace_r/gvl_data_utilities/KPI_PRODUCTION/input/MDRT_2016.xlsx")
   # convert all POSIXct columns to string columns
   dta[] <- lapply(dta, function(x) if(inherits(x, "POSIXct")) strftime(x, '%Y-%m-%d') else x) 
   tablename <- 'RAWDATA_MDRT'
     if (!(tablename %in% dbListTables(my_database$con))) {
       copy_to(my_database, dta, name=tablename, temporary = FALSE)
     } else {
-      results <- dbSendQuery(my_database$con, sprintf("delete FROM %s", tablename))
-      dbClearResult(results)
+      # results <- dbSendQuery(my_database$con, sprintf("delete FROM %s", tablename))
+      # dbClearResult(results)
       db_insert_into(con = my_database$con, table = tablename, values = dta)
     }
 }
@@ -267,10 +268,19 @@ REF_TRANSACTION_CODE <- read_excel("D:/workspace_r/gvl_data_utilities/KPI_PRODUC
 
 # MAIN PROCESS ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 if(interactive()) {
-  # import_agent_list('A6:DA')
-  # import_agent_list('A1:DA')
-  # import_mdrt()
-  # 
+  import_agentlist_from_msaccess("20150131", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201501/KPI_PRODUCTION_20150130-31.accdb")
+  import_agentlist_from_msaccess("20150228", accessdb="d:/Data/KPI_PRODUCTION_20150228.accdb")
+  import_agentlist_from_msaccess("20150331", accessdb="d:/Data/KPI_PRODUCTION_20150331.accdb")
+  import_agentlist_from_msaccess("20150430", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201504/KPI_PRODUCTION_20150430.accdb")
+  import_agentlist_from_msaccess("20150531", accessdb="d:/Data/KPI_PRODUCTION_20150529-31.accdb")
+  import_agentlist_from_msaccess("20150630", accessdb="d:/Data/KPI_PRODUCTION_20150629.accdb")
+  import_agentlist_from_msaccess("20150731", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201507/KPI_PRODUCTION_20150731.accdb")
+  import_agentlist_from_msaccess("20150831", accessdb="d:/Data/KPI_PRODUCTION_20150831.accdb")
+  import_agentlist_from_msaccess("20150930", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201509/KPI_PRODUCTION_20150930.accdb")
+  import_agentlist_from_msaccess("20151031", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201510/KPI_PRODUCTION_20151031.accdb")
+  import_agentlist_from_msaccess("20151130", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201511/KPI_PRODUCTION_20151130.accdb")
+  import_agentlist_from_msaccess("20151231", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201512/KPI_PRODUCTION_20151231.accdb")
+  
   import_agentlist_from_msaccess("20160131", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201601/KPI_PRODUCTION_20160131.accdb")
   import_agentlist_from_msaccess("20160229", accessdb="d:/Data/DA_201602/KPI_PRODUCTION_20160229.accdb")
   import_agentlist_from_msaccess("20160331", accessdb="d:/Data/DA_201603/KPI_PRODUCTION_20160331.accdb")
@@ -292,22 +302,37 @@ if(interactive()) {
   import_agentlist_from_msaccess("20170630", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201706/KPI_PRODUCTION_20170630.accdb")
   import_agentlist_from_msaccess("20170731", accessdb="d:/Data/DA_201707/KPI_PRODUCTION.accdb")
   import_agentlist_from_msaccess("20170831", accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
+  import_agentlist_from_msaccess("20170930", accessdb="d:/Data/DA_201709/KPI_PRODUCTION.accdb")
+  import_agentlist_from_msaccess("20171031", accessdb="d:/Data/DA_201710/KPI_PRODUCTION.accdb")
+  import_agentlist_from_msaccess("20171130", accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
   
   import_kpiproduction_msaccess_GENLION_REPORT("20170430", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201704/KPI_PRODUCTION_20170430.accdb")
   import_kpiproduction_msaccess_GENLION_REPORT("20170531", accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201705/KPI_PRODUCTION_20170531.accdb")
   import_kpiproduction_msaccess_GENLION_REPORT('20170630', accessdb="t:/AGY/AA/Van/EDM/KPI_PRODUCTION/KPI_PRODUCTION_201706/KPI_PRODUCTION_20170630.accdb")
-  
-  import_kpiproduction_msaccess(c('KPITotal','Manpower_Active Ratio'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
-  import_kpiproduction_msaccess(c('AgentMovement'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
-  import_kpiproduction_msaccess(c('Promotion_Demotion_SBM_SUM'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
-  import_kpiproduction_msaccess(c('Persistency'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
-  import_kpiproduction_msaccess(c('Persistency_Y2'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
-  import_kpiproduction_msaccess(c('Product','Product_SME'), accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
-  
   import_kpiproduction_msaccess_GENLION_REPORT('20170831', accessdb="d:/Data/DA_201708/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess_GENLION_REPORT('20170930', accessdb="d:/Data/DA_201709/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess_GENLION_REPORT('20171031', accessdb="d:/Data/DA_201710/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess_GENLION_REPORT('20171130', accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
+  
+  import_kpiproduction_msaccess_Manpower_Active_Ratio_2015_forward('2015', accessdb="t:\\AGY\\AA\\Van\\EDM\\KPI_PRODUCTION\\KPI_PRODUCTION_201612\\KPI_PRODUCTION_20161231.accdb", dbfile)
+  import_kpiproduction_msaccess_Manpower_Active_Ratio_2015_forward('2014', accessdb="t:\\AGY\\AA\\Van\\EDM\\KPI_PRODUCTION\\KPI_PRODUCTION_201612\\KPI_PRODUCTION_20161231.accdb", dbfile)
+  # import_kpiproduction_msaccess(c('KPITotal','Manpower_Active Ratio'), accessdb="t:\\AGY\\AA\\Van\\EDM\\KPI_PRODUCTION\\KPI_PRODUCTION_201612\\KPI_PRODUCTION_20161231.accdb")
+  # import_kpiproduction_msaccess(c('KPITotal','Manpower_Active Ratio'), accessdb="d:/Data/KPI_PRODUCTION_20161231.accdb")
+  import_kpiproduction_msaccess(c('KPITotal', 'Manpower_Active Ratio'), accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
+  # import_kpiproduction_msaccess_drop_then_create_new_table(c('Manpower_Active Ratio'), accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('AgentMovement'), accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('Promotion_Demotion_SBM_SUM'), accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('Persistency'), accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('Persistency_Y1'), accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('Persistency_Y2'), accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess_drop_then_create_new_table(c('Product','Product_SME'), accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('UnitList'), accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
+  import_kpiproduction_msaccess(c('Target'), accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb")
+  
+
   
   # import_kpiproduction_msaccess(c('GATotal'), accessdb="d:/Data/DA_201707/KPI_PRODUCTION.accdb")
-  GATotal <- read_excel("d:\\Data\\DA_201708\\GATotal.xlsx")
+  GATotal <- read_excel("d:\\Data\\DA_201711\\GATotal.xlsx")
   fieldnames <- names(GATotal) # get all field names in the result
   fieldnames <- gsub(' ', '_', fieldnames) # replace all special characters in the fieldnames by '_'
   fieldnames <- gsub('%', '', fieldnames) # replace all special characters in the fieldnames by '_'
@@ -315,7 +340,10 @@ if(interactive()) {
   names(GATotal) <- toupper(fieldnames) # rename all fields in the result
   insert_or_replace_bulk(GATotal, 'RAWDATA_GATotal', dbfile = 'D:\\workspace_data_processing\\gvl_data_utilities\\KPI_PRODUCTION\\main_database.db') # save to database
 
-  ADLIST <- read_excel("t:\\AGY\\AA\\Data daily extract from EDM\\Backup\\201708\\20170831\\ADList.xls")
+  # ADLIST <- read_excel("t:\\AGY\\AA\\Data daily extract from EDM\\Backup\\201708\\20170831\\ADList.xls")
+  # ADLIST <- read_excel("t:\\AGY\\AA\\Data daily extract from EDM\\Backup\\201709\\20170929-30\\ADList.xls")
+  # ADLIST <- read_excel("t:\\AGY\\AA\\Data daily extract from EDM\\Backup\\201710\\20171031\\ADList.xls")
+  ADLIST <- read_excel("t:\\AGY\\AA\\Data daily extract from EDM\\Backup\\201711\\20171130\\ADList.xls")
   fieldnames <- names(ADLIST) # get all field names in the result
   fieldnames <- gsub(' ', '_', fieldnames) # replace all special characters in the fieldnames by '_'
   fieldnames <- gsub('%', '', fieldnames) # replace all special characters in the fieldnames by '_'
@@ -324,6 +352,11 @@ if(interactive()) {
   names(ADLIST) <- toupper(fieldnames) # rename all fields in the result
   insert_or_replaceall(ADLIST, 'RAWDATA_ADLIST', dbfile = 'D:\\workspace_data_processing\\gvl_data_utilities\\KPI_PRODUCTION\\main_database.db') # save to database
   
+  import_lifeasia_data(
+    # folder = "t://AGY//AA//Data daily extract from Life Asia//Backup//201708//20170831",
+    folder = "t://AGY//AA//Data daily extract from Life Asia//Backup//201710//20171031",
+    dbfile = 'KPI_PRODUCTION/main_database.db'
+  )
 }
 RODBC::odbcCloseAll()
 
@@ -336,24 +369,7 @@ RODBC::odbcCloseAll()
 # '2017-04-30'
 
 
-# 
-# # test ####
-# Sys.setlocale(category="LC_ALL", locale = "vietnamese")
-# result <- sqlFetch(accessConn, 'Manpower_Active Ratio', stringsAsFactors = F)
-# 
-# Product <- sqlFetch(accessConn, 'Product', stringsAsFactors = F)
-# # # __ FETCH TABLE ADLIST FROM KPI_PRODUCTION.accdb ####
-# sqlFetch(accessConn, 'Product', fetch = "SET NAMES 'utf8';")
-# 
-# fieldnames <- names(result) # get all field names in the result
-# fieldnames <- gsub(' ', '_', fieldnames) # replace all ' ' characters in the fieldnames by '_'
-# names(result) <- fieldnames # rename all fields in the result
-# results <- dbSendQuery(my_database$con, sprintf("delete FROM %s", 'Manpower_ActiveRatio'))
-# dbClearResult(results)
-# result[] <- lapply(result, function(x) if(inherits(x, "POSIXct")) strftime(x, '%Y-%m-%d') else x)
-# db_insert_into(con = my_database$con, table = 'Manpower_ActiveRatio', values = result)
-# # dbWriteTable(conn = my_database$con, name = 'Manpower_ActiveRatio', value = result, append=TRUE)
-# 
+
 
 
 

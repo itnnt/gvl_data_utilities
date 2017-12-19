@@ -4,7 +4,8 @@ library(RSQLite)
 # Sys.setenv(JAVA_HOME = "C:\\Program Files\\Java\\jre1.8.0_144")
 # options(java.parameters = "-Xmx5120m") 
 
-Sys.setenv(JAVA_HOME = "C:\\Program Files (x86)\\Java\\jre1.8.0_144")
+Sys.setenv(JAVA_HOME = "C:\\Program Files (x86)\\Java\\jre1.8.0_151")
+options(java.parameters = "-Xmx1024m")
 library(xlsx)
 library (lubridate)
 library(zoo)
@@ -20,6 +21,7 @@ color_territory = "#CCFFFF"
 color_region = '#FFFF99'
 color_zone = '#CCFFFF'
 color_team = '#FFFF99'
+dbfile = 'D:\\workspace_data_processing\\gvl_data_utilities\\KPI_PRODUCTION\\main_database.db'
 
 insert_or_replaceall <-
   function(datadf, tbname, dbfile = 'KPI_PRODUCTION/main_database.db') {
@@ -409,6 +411,21 @@ get_ape <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/main_database.d
   APE %>% dplyr::group_by(AGCODE,BUSSINESSDATE) %>%  summarise(APE = sum(APE))
 }
 
+get_office_casesize <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  office_ape <- get_ape_sum_by_office(last_day_of_months, dbfile)
+  office_main_case <- get_main_case_sum_by_office(last_day_of_months, dbfile)
+  office_casesize <- office_ape %>%
+    merge(
+      x = .,
+      y = office_main_case,
+      by.x = c('time_view', 'OFFICE'),
+      by.y = c('time_view', 'OFFICE')
+    ) %>%
+    dplyr::mutate(CASESIZE = APE / CASECOUNT) %>% 
+    dplyr::select( -APE, -CASECOUNT)
+  office_casesize
+}
+
 get_ape_sum_by_office <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/main_database.db'){
   my_database <- src_sqlite(dbfile)
   SQL <- 
@@ -418,12 +435,14 @@ get_ape_sum_by_office <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/m
     result <- dbSendQuery(my_database$con, sprintf(SQL, strftime(d,"%Y%m%")))
     data = fetch(result, encoding="utf-8")
     dbClearResult(result)
-    data = mutate(data, BUSSINESSDATE=strftime(d,"%Y-%m-%d"))
+    data = mutate(data, time_view=strftime(d,"%Y%m"))
     data
   })
   )
   dbDisconnect(my_database$con)
-  APE 
+  APE %>% 
+    dplyr::mutate(APE = APE/10^6) %>% 
+    tidyr::separate(., OFFICE, c('OFFICE'), sep=" ")
 }
 
 get_ape_sum_by_office_designation <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/main_database.db'){
@@ -435,12 +454,29 @@ get_ape_sum_by_office_designation <- function(last_day_of_months, dbfile = 'KPI_
     result <- dbSendQuery(my_database$con, sprintf(SQL, strftime(d,"%Y%m%")))
     data = fetch(result, encoding="utf-8")
     dbClearResult(result)
-    data = mutate(data, BUSSINESSDATE=strftime(d,"%Y-%m-%d"))
+    data = mutate(data, time_view = strftime(d,"%Y%m"))
     data
   })
   )
   dbDisconnect(my_database$con)
-  APE 
+  APE %>% 
+    dplyr::mutate(APE = APE/10^6) %>% 
+    tidyr::separate(., OFFICE, c('OFFICE'), sep = " ")
+}
+
+get_BANCA_mp <- function(dbfile){
+  my_database <- src_sqlite(dbfile)
+  SQL <- "
+  SELECT BSSDT, OFFICE_NAME, DESIGNATIONCODE, AGENT_DESIGNATION FROM
+  BANCASSURANCE_MANPOWER T1 LEFT JOIN DESIGNATION_MAPPING T2 ON UPPER(T1.AGENT_DESIGNATION)=UPPER(T2.DESIGNATION_DESC)
+  "
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding = "utf-8")
+  dbClearResult(result)
+  data %>% 
+    dplyr::mutate(BSSDT = as.Date(strptime(BSSDT, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(time_view = strftime(BSSDT, '%Y%m')) %>% 
+    tidyr::separate(., OFFICE_NAME, c('OFFICE'), sep = " ")
 }
 
 get_rider_ape_sum_by_office <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/main_database.db'){
@@ -459,12 +495,14 @@ get_rider_ape_sum_by_office <- function(last_day_of_months, dbfile = 'KPI_PRODUC
     result <- dbSendQuery(my_database$con, sprintf(SQL, strftime(d,"%Y%m%")))
     data = fetch(result, encoding="utf-8")
     dbClearResult(result)
-    data = mutate(data, BUSSINESSDATE=strftime(d,"%Y-%m-%d"))
+    data = mutate(data, time_view=strftime(d,"%Y%m"))
     data
   })
   )
   dbDisconnect(my_database$con)
-  APE 
+  APE %>% 
+    dplyr::mutate(APE = APE/10^6) %>% 
+    tidyr::separate(., OFFICE, c('OFFICE'), sep = " ")
 }
 
 get_main_case_sum_by_office <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/main_database.db'){
@@ -481,14 +519,15 @@ get_main_case_sum_by_office <- function(last_day_of_months, dbfile = 'KPI_PRODUC
   # apply-like function that returns a data frame
   CASE <- do.call(rbind,lapply(last_day_of_months, function(d) {
     result <- dbSendQuery(my_database$con, sprintf(SQL, strftime(d,"%Y%m%")))
-    data = fetch(result, encoding="utf-8")
+    data = fetch(result, encoding = "utf-8")
     dbClearResult(result)
-    data = mutate(data, BUSSINESSDATE=strftime(d,"%Y-%m-%d"))
+    data = mutate(data, time_view = strftime(d,"%Y%m"))
     data
   })
   )
   dbDisconnect(my_database$con)
-  CASE 
+  CASE %>% 
+    tidyr::separate(., OFFICE, c('OFFICE'), sep = " ")  
 }
 
 get_rider_case_sum_by_office <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/main_database.db'){
@@ -507,12 +546,13 @@ get_rider_case_sum_by_office <- function(last_day_of_months, dbfile = 'KPI_PRODU
     result <- dbSendQuery(my_database$con, sprintf(SQL, strftime(d,"%Y%m%")))
     data = fetch(result, encoding="utf-8")
     dbClearResult(result)
-    data = mutate(data, BUSSINESSDATE=strftime(d,"%Y-%m-%d"))
+    data = mutate(data, time_view = strftime(d, "%Y%m"))
     data
   })
   )
   dbDisconnect(my_database$con)
-  CASE 
+  CASE %>% 
+    tidyr::separate(., OFFICE, c('OFFICE'), sep = " ") 
 }
 
 get_ryp <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/main_database.db'){
@@ -671,7 +711,7 @@ get_Manpower_sa <- function(last_day_of_months, dbfile = 'KPI_PRODUCTION/main_da
     JOIN GVL_AGENTLIST A1 ON (A.BUSSINESSDATE=A1.BUSSINESSDATE AND A.AGENT_CODE=A1.AGENTCD)
     WHERE A.BUSSINESSDATE IN ('%s') 
     AND (A.SERVICING_AGENT='Yes' OR A1.STAFFCD='SA')
-    AND A1.AGENT_STATUS IN ('Active','Suspended')
+    --AND A1.AGENT_STATUS IN ('Active','Suspended')
     ", 
     paste(last_day_of_months, collapse = "','"))
   result <- dbSendQuery(my_database$con, SQL)
@@ -687,46 +727,29 @@ get_Manpower <- function(last_day_of_months, included_ter_ag=F, dbfile = 'KPI_PR
     "SELECT A.AGENT_CODE, A.SUPERVISOR_CODE, A.SUPERVISOR_CODE_DESIGNATION, 
        A.REGIONCD, B.TERRITORY, A.JOINING_DATE, A.BUSSINESSDATE, A.TERMINATION_DATE, 
        A.REINSTATEMENT_DATE, A.AGENT_DESIGNATION,
-       A1.AGENT_STATUS, A.SERVICING_AGENT, A1.STAFFCD, A.ACTIVESP, A.MONTHSTART, A.MONTHEND, A.ZONECD, A.TEAMCD
+       A1.AGENT_STATUS, A.SERVICING_AGENT, A1.STAFFCD, A.ACTIVESP, A.MONTHSTART, A.MONTHEND, A.ZONECD, A.TEAMCD, A.CHANNELCD, A1.OFFICECD, A.UNITCD, A.BRANCHCD
     FROM RAWDATA_MANPOWER_ACTIVERATIO A
     JOIN GVL_AGENTLIST A1 ON (A.BUSSINESSDATE=A1.BUSSINESSDATE AND A.AGENT_CODE=A1.AGENTCD)
-    JOIN RAWDATA_MAPPING_TERRITORY_REGION B ON A.REGIONCD = B.REGION_CODE 
+    left JOIN RAWDATA_MAPPING_TERRITORY_REGION B ON A.REGIONCD = B.REGION_CODE 
     WHERE A.BUSSINESSDATE IN ('%s') 
     AND A1.AGENT_STATUS IN ('Active','Suspended', '%s')
     ", 
     paste(last_day_of_months, collapse = "','"),  ifelse(included_ter_ag,'Terminated',''))
   result <- dbSendQuery(my_database$con, SQL)
   data = fetch(result, encoding="utf-8")
-  # dbClearResult(result)
-  # dbDisconnect(my_database$con)
-  data
-}
-get_Manpower_1.1 <- function(last_day_of_months, included_ter_ag=F, dbfile = 'KPI_PRODUCTION/main_database.db'){
-  my_database <- src_sqlite(dbfile, create = TRUE)
-  SQL <- sprintf(
-    "SELECT A.AGENT_CODE, A.SUPERVISOR_CODE, A.SUPERVISOR_CODE_DESIGNATION, 
-       A.REGIONCD, B.TERRITORY, A.JOINING_DATE, A.BUSSINESSDATE, A.TERMINATION_DATE, 
-       A.REINSTATEMENT_DATE, A.AGENT_DESIGNATION,
-       A.SERVICING_AGENT, A.ACTIVESP, A.MONTHSTART, A.MONTHEND, A.ZONECD, A.TEAMCD
-    FROM RAWDATA_MANPOWER_ACTIVERATIO A
-    JOIN RAWDATA_MAPPING_TERRITORY_REGION B ON A.REGIONCD = B.REGION_CODE 
-    WHERE A.BUSSINESSDATE IN ('%s') 
-    ", 
-    paste(last_day_of_months, collapse = "','"))
-  result <- dbSendQuery(my_database$con, SQL)
-  data = fetch(result, encoding="utf-8")
   dbClearResult(result)
   # dbDisconnect(my_database$con)
-  data
+  data %>% dplyr::mutate(time_view = strftime(as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d')), '%Y%m'))
 }
+
 get_Manpower_1.2 <- function(last_day_of_months, included_ter_ag=F, dbfile = 'KPI_PRODUCTION/main_database.db'){
-  ad = AD_LIST() %>% dplyr::select( ADCODE, ADNAME)
+  ad = AD_LIST(dbfile) %>% dplyr::select( ADCODE, ADNAME)
   my_database <- src_sqlite(dbfile, create = TRUE)
   SQL <- sprintf(
     "SELECT A.AGENT_CODE, A.SUPERVISOR_CODE, A.SUPERVISOR_CODE_DESIGNATION, 
        A.REGIONCD, B.TERRITORY, A.JOINING_DATE, A.BUSSINESSDATE, A.TERMINATION_DATE, 
        A.REINSTATEMENT_DATE, A.AGENT_DESIGNATION,
-       A.SERVICING_AGENT, A.ACTIVESP, A.MONTHSTART, A.MONTHEND, A.ZONECD, A.TEAMCD
+       A.SERVICING_AGENT, A.ACTIVESP, A.ACTIVE, A.MONTHSTART, A.MONTHEND, A.ZONECD, A.TEAMCD, A.UNITCD, A.BRANCHCD
     FROM RAWDATA_MANPOWER_ACTIVERATIO A
     JOIN RAWDATA_MAPPING_TERRITORY_REGION B ON A.REGIONCD = B.REGION_CODE 
     WHERE A.BUSSINESSDATE IN ('%s') 
@@ -755,8 +778,21 @@ get_kpi <- function(bssdt, included_ter_ag=F, dbfile = 'KPI_PRODUCTION/main_data
   data = fetch(result, encoding="utf-8")
   # dbClearResult(result)
   # dbDisconnect(my_database$con)
+  data %>% dplyr::mutate(time_view = strftime(as.Date(strptime(BUSSINESSDATE, '%Y%m%d')), '%Y%m'))
+}
+
+get_team_structure <- function(dbfile){
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf(
+    "select TEAM_NAME as team, ZONE_NAME as zone, REGION_NAME as region from RAWDATA_ADLIST
+    ", 
+    strftime(bssdt, '%Y%m%d'))
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
   data
 }
+
 get_kpi_in_a_period <- function(frdt, todt, dbfile = 'KPI_PRODUCTION/main_database.db'){
   my_database <- src_sqlite(dbfile, create = TRUE)
   SQL <- sprintf(
@@ -783,11 +819,28 @@ get_base_productcd <- function(dbfile = 'KPI_PRODUCTION/main_database.db'){
 all_product <- function(dbfile = 'KPI_PRODUCTION/main_database.db'){
   my_database <- src_sqlite(dbfile, create = TRUE)
   SQL <- 
-      "SELECT PRUDUCTCODE AS PRODUCTCODE, PRODUCTNAME, 'BASEPRODUCT' AS PRODUCT_TYPE FROM RAWDATA_Product WHERE UPPER(BASEPRODUCT)='YES'
-      UNION ALL
-      SELECT PRUDUCTCODE AS PRODUCTCODE, PRODUCTNAME, 'RIDER' AS PRODUCT_TYPE FROM RAWDATA_Product WHERE UPPER(BASEPRODUCT)='NO'
-      UNION ALL
-      SELECT PRUDUCTCODE AS PRODUCTCODE, PRODUCTNAME, 'SME' AS PRODUCT_TYPE FROM RAWDATA_Product_SME
+      "
+SELECT A.*, B.VIETNAMESENAME FROM (
+  SELECT
+  PRUDUCTCODE   AS PRODUCTCODE,
+  PRODUCTNAME,
+  'BASEPRODUCT' AS PRODUCT_TYPE
+  FROM RAWDATA_Product
+  WHERE UPPER(BASEPRODUCT) = 'YES'
+  UNION ALL
+  SELECT
+  PRUDUCTCODE AS PRODUCTCODE,
+  PRODUCTNAME,
+  'RIDER'     AS PRODUCT_TYPE
+  FROM RAWDATA_Product
+  WHERE UPPER(BASEPRODUCT) = 'NO'
+  UNION ALL
+  SELECT
+  PRUDUCTCODE AS PRODUCTCODE,
+  PRODUCTNAME,
+  'SME'       AS PRODUCT_TYPE
+  FROM RAWDATA_Product_SME
+  ) A LEFT JOIN GVL_PRODUCT B ON A.PRODUCTCODE = B.PRUDUCTCODE
       "
   result <- dbSendQuery(my_database$con, SQL)
   data = fetch(result, encoding="utf-8")
@@ -1081,8 +1134,13 @@ get_kpitotal_policies_first_issued <- function(yyyy, mm, dbfile = 'KPI_PRODUCTIO
     SELECT * FROM RAWDATA_KPITotal T1
     JOIN RAWDATA_Product T2 ON T1.PRODUCTCODE=T2.PRUDUCTCODE
     WHERE BUSSINESSDATE LIKE '%s%s%s' 
-    AND TXNCODE='T642' 
-    AND BUSSINESSDATE=HOISSDTE
+    AND (
+        (TXNCODE='T642' AND BUSSINESSDATE=HOISSDTE) 
+        OR 
+        (TXNCODE='T646' OR TXNCODE='TR7K') 
+    )
+    AND UPPER(T2.BASEPRODUCT)='YES'
+    
     ", yyyy, mm, '%')
   result <- dbSendQuery(my_database$con, SQL)
   data = fetch(result, encoding="utf-8")
@@ -1473,6 +1531,110 @@ Manpower <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_data
     dplyr::mutate(kpi='# Manpower_by_designation:Total')
   ) 
 }
+Manpower_exclude_2GA <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf("
+       SELECT AGENTCD FROM GVL_AGENTLIST WHERE BUSSINESSDATE='%s' AND OFFICECD in (
+   select OFFICECD from RAWDATA_GATotal where OFFICE_NAME in ('003 GA HCM 2', '010 GA TIỀN GIANG 1')
+  )
+    ",bssdt)
+  result <- dbSendQuery(my_database$con, SQL)
+  excluded_GA = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  if(!inherits(genlion_final_dt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  # phân loại agent theo nhóm sa, genlion, rookie... theo thứ tự ưu tiên từ cao đến thấp.
+  sa = get_Manpower_sa(bssdt, dbfile) %>% 
+    dplyr::mutate(SEG='SA') %>% 
+    dplyr::select(AGENT_CODE, SEG) %>% 
+    dplyr::filter(!AGENT_CODE %in% excluded_GA$AGENTCD)
+  
+  # genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+  #   dplyr::mutate(SEG='GENLION') %>% 
+  #   dplyr::select(AGENT_CODE, SEG) %>% 
+  #   dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
+  if (bssdt >= as.Date('2017-04-30')) {
+    genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+      dplyr::mutate(SEG = 'GENLION') %>% 
+      dplyr::select(AGENT_CODE, SEG) %>% 
+      dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE) %>% 
+      dplyr::filter(., !AGENT_CODE %in% excluded_GA$AGENTCD)
+  } else {
+    genlion <- get_Manpower_MDRT(bssdt, dbfile) %>% 
+      dplyr::select(AGENT_CODE) %>% 
+      dplyr::filter(!AGENT_CODE %in% excluded_GA$AGENTCD) %>% 
+      dplyr::mutate(SEG = 'GENLION') # TRUOC 20170430 THI DAY LA MDRT NHUNG DE GENLION TUONG TRUNG
+  }
+  
+  mp = get_Manpower(bssdt, included_ter_ag = F, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    merge(x=., y=rbind(genlion,sa), by.x='AGENT_CODE', by.y='AGENT_CODE', all.x=T) %>% 
+    dplyr::filter(!AGENT_CODE %in% excluded_GA$AGENTCD)
+  
+  try((mp[is.na(mp$SEG) & mp$MDIFF==0,]$SEG='Rookie in month'), silent= T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF==1,]$SEG='Rookie last month'), silent= T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF %in% c(2:3),]$SEG='2-3 months'), silent= T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF %in% c(4:6),]$SEG='4-6 months'), silent= T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF %in% c(7:12),]$SEG='7-12 months'), silent= T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF >= 13,]$SEG='13+ months'), silent= T)
+  
+  mp = rbind(
+    mp %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY, SEG, level='TERRITORY') %>% 
+      dplyr::summarise(value=n()) %>% 
+      dplyr::ungroup(.)
+    ,
+    mp %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', SEG, level='COUNTRY') %>% 
+      dplyr::summarise(value=n()) %>% 
+      dplyr::ungroup(.)
+  )
+  
+  
+  # create index
+  mp['IDX']=0
+  mp['kpi']=0
+  try((mp[mp$SEG=='GENLION',]$IDX = 1), silent= T)
+  try((mp[mp$SEG=='GENLION',]$kpi = '# Manpower_by_rookie_mdrt:MDRT_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='Rookie in month',]$IDX = 2), silent= T)
+  try((mp[mp$SEG=='Rookie in month',]$kpi = '# Manpower_by_rookie_mdrt:Rookie in month_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='Rookie last month',]$IDX = 3), silent= T)
+  try((mp[mp$SEG=='Rookie last month',]$kpi = '# Manpower_by_rookie_mdrt:Rookie last month_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='2-3 months',]$IDX = 4), silent= T)
+  try((mp[mp$SEG=='2-3 months',]$kpi = '# Manpower_by_rookie_mdrt:2-3 months_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='4-6 months',]$IDX = 5), silent= T)
+  try((mp[mp$SEG=='4-6 months',]$kpi = '# Manpower_by_rookie_mdrt:4 - 6 mths_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='7-12 months',]$IDX = 6), silent= T)
+  try((mp[mp$SEG=='7-12 months',]$kpi = '# Manpower_by_rookie_mdrt:7-12mth_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='13+ months',]$IDX = 7), silent= T)
+  try((mp[mp$SEG=='13+ months',]$kpi = '# Manpower_by_rookie_mdrt:13+mth_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='SA',]$IDX = 8), silent= T)
+  try((mp[mp$SEG=='SA',]$kpi = '# Manpower_by_rookie_mdrt:SA_excluded_2GA'), silent= T)
+  
+  rbind(
+  mp %>% 
+    dplyr::mutate(time_view=strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::mutate(territory=TERRITORY) %>% 
+    dplyr::arrange(territory, IDX) %>% 
+    dplyr::select(-BUSSINESSDATE, -TERRITORY, -SEG, -IDX)
+  ,
+  # total
+  mp %>% dplyr::group_by(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory=TERRITORY, level) %>% 
+    dplyr::summarise(value=sum(value)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi='# Manpower_by_designation:Total_excluded_2GA')
+  ) 
+}
 
 Active <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
   if(!inherits(bssdt, "Date")) {
@@ -1557,6 +1719,607 @@ Active <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_databa
     dplyr::mutate(kpi='# Active_by_rookie_mdrt:Total (excl. SA)')
   ) %>% dplyr::mutate(level='TERRITORY')
 }
+
+Active1.1 <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  # 
+  # BEFORE 201704 -> SEG BY MDRT
+  # 201704 -> SEG BY GENLION
+  # 
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  if(!inherits(genlion_final_dt, "Date")) {
+    message("date parameter should be a Date type")
+    stop()
+  }
+  # phân loại agent theo nhóm sa, genlion, rookie... theo thứ tự ưu tiên từ cao đến thấp.
+  sa = get_Manpower_sa(bssdt, dbfile) %>% 
+    dplyr::mutate(SEG='SA') %>% 
+    dplyr::select(AGENT_CODE, SEG)
+  
+  if (bssdt >= as.Date('2017-04-30')) {
+    genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+      dplyr::mutate(SEG = 'GENLION') %>% 
+      dplyr::select(AGENT_CODE, SEG) %>% 
+      dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
+  } else {
+    genlion <- get_Manpower_MDRT(bssdt, dbfile) %>% 
+      dplyr::select(AGENT_CODE) %>% 
+      dplyr::mutate(SEG = 'GENLION') # TRUOC 20170430 THI DAY LA MDRT NHUNG DE GENLION TUONG TRUNG
+  }
+
+  
+  mp = get_Manpower(bssdt, included_ter_ag = F, dbfile) %>% 
+    dplyr::filter(ACTIVESP=='Yes') %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    merge(x=., y=rbind(genlion,sa), by.x='AGENT_CODE', by.y='AGENT_CODE', all.x=T)
+  
+  mp[is.na(mp$SEG) & mp$MDIFF==0,]$SEG='Rookie in month'
+  mp[is.na(mp$SEG) & mp$MDIFF==1,]$SEG='Rookie last month'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(2:3),]$SEG='2-3 months'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(4:6),]$SEG='4-6 months'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(7:12),]$SEG='7-12 months'
+  mp[is.na(mp$SEG) & mp$MDIFF >= 13,]$SEG='13+ months'
+  
+  mp = mp %>% 
+    dplyr::group_by(BUSSINESSDATE, TERRITORY, SEG) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.)
+  
+  
+  # create index
+  mp['IDX']=0
+  mp['kpi']=0
+  mp[mp$SEG=='GENLION',]$IDX = 1
+  mp[mp$SEG=='GENLION',]$kpi = '# Active_by_rookie_mdrt:MDRT'
+  mp[mp$SEG=='Rookie in month',]$IDX = 2
+  mp[mp$SEG=='Rookie in month',]$kpi = '# Active_by_rookie_mdrt:Rookie in month'
+  mp[mp$SEG=='Rookie last month',]$IDX = 3
+  mp[mp$SEG=='Rookie last month',]$kpi = '# Active_by_rookie_mdrt:Rookie last month'
+  mp[mp$SEG=='2-3 months',]$IDX = 4
+  mp[mp$SEG=='2-3 months',]$kpi = '# Active_by_rookie_mdrt:2-3 months'
+  mp[mp$SEG=='4-6 months',]$IDX = 5
+  mp[mp$SEG=='4-6 months',]$kpi = '# Active_by_rookie_mdrt:4 - 6 mths'
+  mp[mp$SEG=='7-12 months',]$IDX = 6
+  mp[mp$SEG=='7-12 months',]$kpi = '# Active_by_rookie_mdrt:7-12mth'
+  mp[mp$SEG=='13+ months',]$IDX = 7
+  mp[mp$SEG=='13+ months',]$kpi = '# Active_by_rookie_mdrt:13+mth'
+  mp[mp$SEG=='SA',]$IDX = 8
+  mp[mp$SEG=='SA',]$kpi = '# Active_by_rookie_mdrt:SA'
+  
+  rbind(
+  mp %>% 
+    dplyr::mutate(time_view=strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::mutate(territory=TERRITORY) %>% 
+    dplyr::arrange(territory, IDX) %>% 
+    dplyr::select(-BUSSINESSDATE, -TERRITORY, -SEG, -IDX)
+  ,
+  # total
+  mp %>% dplyr::group_by(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory=TERRITORY) %>% 
+    dplyr::summarise(value=sum(value)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi='# Active_by_rookie_mdrt:Total')
+  ,
+  # total_exclude_sa
+  mp %>% 
+    dplyr::filter(SEG!='SA') %>% 
+    dplyr::group_by(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory=TERRITORY) %>% 
+    dplyr::summarise(value=sum(value)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi='# Active_by_rookie_mdrt:Total (excl. SA)')
+  ) %>% dplyr::mutate(level='TERRITORY')
+}
+
+active_individual <- function(bssdt, dbfile){
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  mp = get_Manpower(bssdt, included_ter_ag = F, dbfile) %>%
+    dplyr::filter(ACTIVESP=='Yes') %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) 
+  mp 
+}
+active_individual_sa_excl <- function(bssdt, dbfile){
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  mp = get_Manpower(bssdt, included_ter_ag = F, dbfile) %>%
+    dplyr::filter(ACTIVESP=='Yes') %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) 
+  sa = get_Manpower_sa(bssdt, dbfile)
+  mp %>% dplyr::filter(!AGENT_CODE %in% sa$AGENT_CODE) 
+}
+active_individual_fullyear <- function(yyyy, dbfile){
+  ad = AD_LIST(dbfile) %>% dplyr::select( ADCODE, ADNAME)
+  do.call(rbind, lapply(generate_last_day_of_month(yyyy), function(d) {
+    active_individual(d, dbfile)
+  })
+  ) %>%  
+    merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME) 
+}
+active_individual_fullyear_sa_excl <- function(yyyy, dbfile){
+  ad = AD_LIST(dbfile) %>% dplyr::select( ADCODE, ADNAME)
+  do.call(rbind, lapply(generate_last_day_of_month(yyyy), function(d) {
+    active_individual_sa_excl(d, dbfile)
+  })
+  )%>%  
+    merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME) 
+}
+
+get_manpower_individual_sa_excl <- function(bssdt, dbfile){
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  mp = get_manpower_individual(bssdt, dbfile) 
+  sa = get_Manpower_sa(bssdt, dbfile)
+  mp %>% dplyr::filter(!AGENT_CODE %in% sa$AGENT_CODE)
+}
+get_manpower_total_fullyear <- function(yyyy, dbfile){
+  ad = AD_LIST(dbfile) %>% dplyr::select( ADCODE, ADNAME)
+  do.call(rbind, lapply(generate_last_day_of_month(yyyy), function(d) {
+    get_manpower_individual(d, dbfile)
+  })
+  ) 
+  # %>%  
+  #   merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
+  #   dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+  #   merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
+  #   dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+  #   merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
+  #   dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+  #   merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
+  #   dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME) 
+}
+get_manpower_total_fullyear_sa_excl <- function(yyyy, dbfile){
+  do.call(rbind, lapply(generate_last_day_of_month(yyyy), function(d) {
+    get_manpower_individual_sa_excl(d, dbfile)
+  })
+  )
+}
+get_sa_total_fullyear <- function(yyyy, dbfile){
+  do.call(rbind, lapply(generate_last_day_of_month(yyyy), function(d) {
+    get_Manpower_sa(d, dbfile)
+  })
+  )
+}
+new_recruit_individual <- function(bssdt, dbfile){
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  ad = AD_LIST(dbfile) %>% dplyr::select( ADCODE, ADNAME)
+  mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    dplyr::filter(MDIFF==0) 
+  mp %>%  
+    merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME)
+}
+active_recruit_leader_individual <- function(bssdt, dbfile){
+  mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) 
+  mp %>% 
+    # filter agent whose joining dates in the month of the business date
+    dplyr::filter(
+      substr(BUSSINESSDATE, 1, 7)==substr(JOINING_DATE, 1, 7) 
+    ) %>% 
+    # chỉ đếm những leader nào tuyển AG mới, còn leader tuyển um, us... thì không đếm
+    # dplyr::filter(AGENT_DESIGNATION=='AG') %>% 
+    # tuy nhiên theo Châu Huỳnh thì trường hợp leader tuyển leader vẫn đếm luôn nên không lọc điều kiện này
+    convert_string_to_date('BUSSINESSDATE', "%Y-%m-%d") %>% 
+    # tìm các leader có tuyển dụng trong tháng
+    group_by(BUSSINESSDATE=strftime(BUSSINESSDATE, '%Y%m'), SUPERVISOR_CODE) %>% # group data by month
+    summarise(`value` = n()) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::filter(value>=1) %>% # leader recruited at least 1 agent is counted as active recruit leader
+    dplyr::filter(!is.na(SUPERVISOR_CODE) & SUPERVISOR_CODE != '') %>% 
+    merge(
+      x = .,
+      y = mp %>% dplyr::select(-SUPERVISOR_CODE, -BUSSINESSDATE),
+      by.x = c('SUPERVISOR_CODE'),
+      by.y = c('AGENT_CODE'),
+      all.x = TRUE
+    )
+}
+new_recruit_individual_fullyear <- function(yyyy, dbfile){
+  do.call(rbind, lapply(generate_last_day_of_month(yyyy), function(d) {
+    new_recruit_individual(d, dbfile)
+  })
+  )
+}
+rookie_performance_individual_in_first_90days <- function(bssdt, number_of_studied_months, dbfile){
+  if(!inherits(bssdt, "Date")) {
+    message ("bssdt should be a Date type")
+    stop()
+  }
+  y <- lubridate::year(bssdt)
+  m <- lubridate::month(bssdt)
+  studied_months = seq(1:number_of_studied_months)-1
+  # apply-like function that returns a data frame
+  bssdts <- do.call(rbind,lapply(studied_months, function(d) {
+    # strftime(get_last_day_of_month_x(y, m, d), '%Y-%m-%d')
+    get_last_day_of_month_x_v1(y, m, d)
+  })
+  )
+  mp = get_Manpower(bssdt, T, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::filter(strftime(JOINING_DATE, '%Y-%m') %in% strftime(as.Date(bssdts$time_view), '%Y-%m'))
+  
+  # kpitotal_case <- do.call(rbind,lapply(bssdts, function(d) {
+  #   print(strftime((as.Date(d)), '%Y-%m-%d'))
+  #   get_kpitotal_policies_first_issued(
+  #     strftime((as.Date(d)), '%Y'), 
+  #     strftime((as.Date(d)), '%m'), 
+  #     dbfile)
+  # })
+  # )
+  # 
+  
+  kpitotal_case <- do.call(rbind,apply(bssdts, 1, function(d) {
+    
+    get_kpitotal_policies_first_issued(
+      strftime(d['time_view'], '%Y'), 
+      strftime(d['time_view'], '%m'), 
+      dbfile) %>% dplyr::mutate(M=d['M'])
+    
+  })
+  )
+  
+  bssdts = bssdts %>% 
+    dplyr::mutate(time_view = strftime(time_view, '%Y%m'))
+  
+  casecount_summary <- mp %>% 
+    merge(x=., y=kpitotal_case, by.x=c('AGENT_CODE'), by.y=c('AGCODE')) %>% 
+    # tư vấn có hợp đồng vào ngày thứ x sau ngày joined in date 
+    dplyr::mutate(HAS_POLICY_ISSUED_IN_DAYS=HOISSDTE-JOINING_DATE+1) %>% 
+    dplyr::mutate(has_policy_d15=ifelse(HAS_POLICY_ISSUED_IN_DAYS %in% c(0:15), CASE, 0)) %>% 
+    dplyr::mutate(has_policy_d30=ifelse(HAS_POLICY_ISSUED_IN_DAYS %in% c(0:30), CASE, 0)) %>% 
+    dplyr::mutate(has_policy_d60=ifelse(HAS_POLICY_ISSUED_IN_DAYS %in% c(0:60), CASE, 0)) %>% 
+    dplyr::mutate(has_policy_d90=ifelse(HAS_POLICY_ISSUED_IN_DAYS %in% c(0:90), CASE, 0)) %>% 
+    dplyr::group_by(recruit_month = strftime(JOINING_DATE, '%Y%m'), REGIONCD, ZONECD, OFFICECD, TEAMCD, UNITCD, BRANCHCD, AGENT_CODE) %>% 
+    # mỗi tư vấn có bao nhiêu hđ trong d1-d30, d31-d60, d61-d90
+    dplyr::summarise(
+      has_policy_d15=sum(has_policy_d15),
+      has_policy_d30=sum(has_policy_d30),
+      has_policy_d60=sum(has_policy_d60),
+      has_policy_d90=sum(has_policy_d90)
+    ) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate('1case/15d' = ifelse(has_policy_d15 >= 1, 1, 0)) %>% 
+    dplyr::mutate('1case/30d' = ifelse(has_policy_d30 >= 1, 1, 0)) %>% 
+    dplyr::mutate('3case/60d' = ifelse(has_policy_d60 >= 3, 1, 0)) %>% 
+    dplyr::mutate('5case/90d' = ifelse(has_policy_d90 >= 5, 1, 0)) %>% 
+    dplyr::group_by(time_view=recruit_month, REGIONCD, ZONECD, OFFICECD, TEAMCD, UNITCD, BRANCHCD, AGENT_CODE) %>% 
+    dplyr::summarise(
+      `1case/15d`=sum(`1case/15d`),
+      `1case/30d`=sum(`1case/30d`),
+      `3case/60d`=sum(`3case/60d`),
+      `5case/90d`=sum(`5case/90d`)
+    ) %>% 
+    dplyr::ungroup() %>% 
+    merge(
+      x = .,
+      y = bssdts,
+      by.x = 'time_view',
+      by.y = 'time_view',
+      all.x = T
+    )
+  (tidyr::gather(casecount_summary, SEG, CASE, -time_view, -M, -REGIONCD, -ZONECD, -OFFICECD, -TEAMCD, -UNITCD, -BRANCHCD, -AGENT_CODE))
+}
+
+rookie_performance_individual_in_first_90days_fullyear <- function(yyyy, dbfile) {
+  do.call(rbind, lapply(generate_last_day_of_month(yyyy), function(d) {
+    rookie_performance_individual_in_first_90days_v2(d, dbfile)
+  })
+  )
+}
+rookie_agent_numberofday_joined_first90days_fullyear <- function(yyyy, dbfile) {
+  do.call(rbind, lapply(generate_last_day_of_month(yyyy), function(d) {
+    rookie_agent_numberofday_joined_first90days(d, dbfile) 
+  })
+  )
+}
+# rookie_performance_individual_in_first_90days_v1 delete ----
+rookie_performance_individual_in_first_90days_v1 <- function(bssdt, dbfile){
+  if(!inherits(bssdt, "Date")) {
+    message ("bssdt should be a Date type")
+    stop()
+  }
+  m1 = get_last_day_of_m1(strftime(bssdt, "%Y"), strftime(bssdt, "%m"))
+  m2 = get_last_day_of_m1(strftime(m1, "%Y"), strftime(m1, "%m"))
+  m3 = get_last_day_of_m1(strftime(m2, "%Y"), strftime(m1, "%m"))
+  bssdts <- c(bssdt, m1, m2, m3)
+  mp = new_recruit_individual(bssdt, dbfile) %>% 
+    dplyr::mutate(JOINED_DAY=BUSSINESSDATE-JOINING_DATE+1) 
+  
+  day15 = mp %>% dplyr::filter(JOINED_DAY <= 15)
+  day30 = mp %>% dplyr::filter(JOINED_DAY <= 30)
+  day60 = mp %>% dplyr::filter(JOINED_DAY <= 60)
+  day90 = mp %>% dplyr::filter(JOINED_DAY <= 90)
+  
+  kpitotal_case <- do.call(rbind,lapply(bssdts, function(d) {
+    get_kpitotal_policies_first_issued(
+      strftime(d, '%Y'), 
+      strftime(d, '%m'), 
+      dbfile)
+    
+  })
+  )
+  
+  casecount_summary = rbind(
+    day15 %>% 
+      merge(x=., y=kpitotal_case, by.x=c('AGENT_CODE'), by.y=c('AGCODE')) %>% 
+      dplyr::mutate(casetype='has_policy_d15') %>% 
+      dplyr::group_by(time_view = strftime(BUSSINESSDATE, '%Y%m'), REGIONCD, ZONECD, OFFICECD, TEAMCD, UNITCD, BRANCHCD, AGENT_CODE, casetype) %>% 
+      # mỗi tư vấn có bao nhiêu hđ trong d1-d30, d31-d60, d61-d90
+      dplyr::summarise(
+        total_case=sum(CASE)
+      ) %>% 
+      dplyr::filter(total_case >= 1) %>% 
+      dplyr::mutate(SEG= '1case/15d',NUMBER_OF_CASE_MEET_CRITERIA=1) %>% 
+      dplyr::ungroup()
+    ,
+    day30 %>% 
+      merge(x=., y=kpitotal_case, by.x=c('AGENT_CODE'), by.y=c('AGCODE')) %>% 
+      dplyr::mutate(casetype='has_policy_d30') %>% 
+      dplyr::group_by(time_view = strftime(BUSSINESSDATE, '%Y%m'), REGIONCD, ZONECD, OFFICECD, TEAMCD, UNITCD, BRANCHCD, AGENT_CODE, casetype) %>% 
+      # mỗi tư vấn có bao nhiêu hđ trong d1-d30, d31-d60, d61-d90
+      dplyr::summarise(
+        total_case=sum(CASE)
+      ) %>% 
+      dplyr::filter(total_case >= 1) %>% 
+      dplyr::mutate(SEG= '1case/30d',NUMBER_OF_CASE_MEET_CRITERIA=1) %>% 
+      dplyr::ungroup()
+    ,
+    day60 %>% 
+      merge(x=., y=kpitotal_case, by.x=c('AGENT_CODE'), by.y=c('AGCODE')) %>% 
+      dplyr::mutate(casetype='has_policy_d60') %>% 
+      dplyr::group_by(time_view = strftime(BUSSINESSDATE, '%Y%m'), REGIONCD, ZONECD, OFFICECD, TEAMCD, UNITCD, BRANCHCD, AGENT_CODE, casetype) %>% 
+      # mỗi tư vấn có bao nhiêu hđ trong d1-d30, d31-d60, d61-d90
+      dplyr::summarise(
+        total_case=sum(CASE)
+      ) %>% 
+      dplyr::filter(total_case >= 3) %>% 
+      dplyr::mutate(SEG= '3case/60d',NUMBER_OF_CASE_MEET_CRITERIA=1) %>% 
+      dplyr::ungroup()
+    ,
+    day90 %>% 
+      merge(x=., y=kpitotal_case, by.x=c('AGENT_CODE'), by.y=c('AGCODE')) %>% 
+      dplyr::mutate(casetype='has_policy_d90') %>% 
+      dplyr::group_by(time_view = strftime(BUSSINESSDATE, '%Y%m'), REGIONCD, ZONECD, OFFICECD, TEAMCD, UNITCD, BRANCHCD, AGENT_CODE, casetype) %>% 
+      # mỗi tư vấn có bao nhiêu hđ trong d1-d30, d31-d60, d61-d90
+      dplyr::summarise(
+        total_case=sum(CASE)
+      ) %>% 
+      dplyr::filter(total_case >= 5) %>% 
+      dplyr::mutate(SEG= '5case/90d',NUMBER_OF_CASE_MEET_CRITERIA=1) %>% 
+      dplyr::ungroup()
+  ) %>% 
+    dplyr::select(-casetype, -total_case) 
+  casecount_summary
+}
+rookie_performance_individual_in_first_90days_v2 <- function(bssdt, dbfile){
+  if(!inherits(bssdt, "Date")) {
+    message ("bssdt should be a Date type")
+    stop()
+  }
+  
+  m1 = get_last_day_of_next_m1(strftime(bssdt, "%Y"), strftime(bssdt, "%m"))
+  m2 = get_last_day_of_next_m2(strftime(bssdt, "%Y"), strftime(bssdt, "%m"))
+  m3 = get_last_day_of_next_m3(strftime(bssdt, "%Y"), strftime(bssdt, "%m"))
+  m4 = get_last_day_of_next_m4(strftime(bssdt, "%Y"), strftime(bssdt, "%m"))
+  bssdts <- c(bssdt, m1, m2, m3, m4)
+  
+  mp = new_recruit_individual(bssdt, dbfile) %>% 
+    dplyr::mutate(JOINED_DAY=BUSSINESSDATE-JOINING_DATE+1) 
+  
+  kpitotal_case <- do.call(rbind,lapply(bssdts, function(d) {
+    get_kpitotal_policies_first_issued(
+      strftime(d, '%Y'), 
+      strftime(d, '%m'), 
+      dbfile)
+    
+  })
+  )
+  
+  casecount_summary <- mp %>% 
+    merge(x=., y=kpitotal_case, by.x=c('AGENT_CODE'), by.y=c('AGCODE')) %>% 
+    # tư vấn có hợp đồng vào ngày thứ x sau ngày joined in date 
+    dplyr::mutate(HAS_POLICY_ISSUED_IN_DAYS=HOISSDTE-JOINING_DATE+1) %>% 
+    dplyr::mutate(has_policy_d15=ifelse(HAS_POLICY_ISSUED_IN_DAYS %in% c(0:15), CASE, 0)) %>% 
+    dplyr::mutate(has_policy_d30=ifelse(HAS_POLICY_ISSUED_IN_DAYS %in% c(0:30), CASE, 0)) %>% 
+    dplyr::mutate(has_policy_d60=ifelse(HAS_POLICY_ISSUED_IN_DAYS %in% c(0:60), CASE, 0)) %>% 
+    dplyr::mutate(has_policy_d90=ifelse(HAS_POLICY_ISSUED_IN_DAYS %in% c(0:90), CASE, 0)) %>% 
+    dplyr::group_by(time_view=strftime(BUSSINESSDATE, '%Y%m'), REGIONCD, ZONECD, OFFICECD, TEAMCD, UNITCD, BRANCHCD, AGENT_CODE) %>% 
+    # mỗi tư vấn có bao nhiêu hđ trong d1-d30, d31-d60, d61-d90
+    dplyr::summarise(
+      has_policy_d15=sum(has_policy_d15),
+      has_policy_d30=sum(has_policy_d30),
+      has_policy_d60=sum(has_policy_d60),
+      has_policy_d90=sum(has_policy_d90)
+    ) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate('1case/15d' = ifelse(has_policy_d15 >= 1, 1, 0)) %>% 
+    dplyr::mutate('1case/30d' = ifelse(has_policy_d30 >= 1, 1, 0)) %>% 
+    dplyr::mutate('3case/60d' = ifelse(has_policy_d60 >= 3, 1, 0)) %>% 
+    dplyr::mutate('5case/90d' = ifelse(has_policy_d90 >= 5, 1, 0)) %>% 
+    dplyr::group_by(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, UNITCD, BRANCHCD, AGENT_CODE) %>% 
+    dplyr::summarise(
+      `1case/15d`=sum(`1case/15d`),
+      `1case/30d`=sum(`1case/30d`),
+      `3case/60d`=sum(`3case/60d`),
+      `5case/90d`=sum(`5case/90d`)
+    ) %>% 
+    dplyr::ungroup() 
+  (tidyr::gather(casecount_summary, SEG, NUMBER_OF_CASE_MEET_CRITERIA, -time_view, -REGIONCD, -ZONECD, -OFFICECD, -TEAMCD, -UNITCD, -BRANCHCD, -AGENT_CODE))
+}
+rookie_agent_numberofday_joined_first90days <- function(bssdt, dbfile){
+  if(!inherits(bssdt, "Date")) {
+    message ("bssdt should be a Date type")
+    stop()
+  }
+  mp = new_recruit_individual(bssdt, dbfile) %>% 
+    dplyr::mutate(JOINED_DAY=BUSSINESSDATE-JOINING_DATE+1) 
+  
+  rbind(
+    mp %>% dplyr::mutate(SEG= '1case/15d') ,
+    mp %>% dplyr::mutate(SEG= '1case/30d') ,
+    mp %>% dplyr::mutate(SEG= '3case/60d') ,
+    mp %>% dplyr::mutate(SEG= '5case/90d') # dat seg chi de tinh % 90-day-agents co 5cases up
+  )  %>% 
+    dplyr::mutate(time_view = strftime(BUSSINESSDATE, '%Y%m'), AGENT_COUNT =1) %>% 
+    dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, UNITCD, BRANCHCD, AGENT_CODE, SEG, AGENT_COUNT) 
+}
+
+Active1.1_exclude_2GA <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf("
+       SELECT AGENTCD FROM GVL_AGENTLIST WHERE BUSSINESSDATE='%s' AND OFFICECD in (
+   select OFFICECD from RAWDATA_GATotal where OFFICE_NAME in ('003 GA HCM 2', '010 GA TIỀN GIANG 1')
+  )
+    ",bssdt)
+  result <- dbSendQuery(my_database$con, SQL)
+  excluded_GA = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  # 
+  # BEFORE 201704 -> SEG BY MDRT
+  # 201704 -> SEG BY GENLION
+  # 
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  if(!inherits(genlion_final_dt, "Date")) {
+    message("date parameter should be a Date type")
+    stop()
+  }
+  # phân loại agent theo nhóm sa, genlion, rookie... theo thứ tự ưu tiên từ cao đến thấp.
+  sa = get_Manpower_sa(bssdt, dbfile) %>% 
+    dplyr::mutate(SEG='SA') %>% 
+    dplyr::select(AGENT_CODE, SEG) %>% 
+    dplyr::filter(!AGENT_CODE %in% excluded_GA$AGENTCD)
+  
+  if (bssdt >= as.Date('2017-04-30')) {
+    genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+      dplyr::mutate(SEG = 'GENLION') %>% 
+      dplyr::select(AGENT_CODE, SEG) %>% 
+      dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE) %>% 
+      dplyr::filter(., !AGENT_CODE %in% excluded_GA$AGENTCD)
+  } else {
+    genlion <- get_Manpower_MDRT(bssdt, dbfile) %>% 
+      dplyr::select(AGENT_CODE) %>% 
+      dplyr::filter(!AGENT_CODE %in% excluded_GA$AGENTCD) %>% 
+      dplyr::mutate(SEG = 'GENLION') # TRUOC 20170430 THI DAY LA MDRT NHUNG DE GENLION TUONG TRUNG
+  }
+
+  
+  mp = get_Manpower(bssdt, included_ter_ag = F, dbfile) %>% 
+    dplyr::filter(ACTIVESP=='Yes') %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    merge(x=., y=rbind(genlion,sa), by.x='AGENT_CODE', by.y='AGENT_CODE', all.x=T) %>% 
+    dplyr::filter(!AGENT_CODE %in% excluded_GA$AGENTCD)
+  
+  mp[is.na(mp$SEG) & mp$MDIFF==0,]$SEG='Rookie in month'
+  mp[is.na(mp$SEG) & mp$MDIFF==1,]$SEG='Rookie last month'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(2:3),]$SEG='2-3 months'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(4:6),]$SEG='4-6 months'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(7:12),]$SEG='7-12 months'
+  mp[is.na(mp$SEG) & mp$MDIFF >= 13,]$SEG='13+ months'
+  
+  mp = mp %>% 
+    dplyr::group_by(BUSSINESSDATE, TERRITORY, SEG) %>% 
+    dplyr::summarise(value=n()) %>% 
+    dplyr::ungroup(.)
+  
+  
+  # create index
+  mp['IDX']=0
+  mp['kpi']=0
+  try((mp[mp$SEG=='GENLION',]$IDX = 1), silent= T)
+  try((mp[mp$SEG=='GENLION',]$kpi = '# Active_by_rookie_mdrt:MDRT_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='Rookie in month',]$IDX = 2), silent= T)
+  try((mp[mp$SEG=='Rookie in month',]$kpi = '# Active_by_rookie_mdrt:Rookie in month_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='Rookie last month',]$IDX = 3), silent= T)
+  try((mp[mp$SEG=='Rookie last month',]$kpi = '# Active_by_rookie_mdrt:Rookie last month_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='2-3 months',]$IDX = 4), silent= T)
+  try((mp[mp$SEG=='2-3 months',]$kpi = '# Active_by_rookie_mdrt:2-3 months_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='4-6 months',]$IDX = 5), silent= T)
+  try((mp[mp$SEG=='4-6 months',]$kpi = '# Active_by_rookie_mdrt:4 - 6 mths_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='7-12 months',]$IDX = 6), silent= T)
+  try((mp[mp$SEG=='7-12 months',]$kpi = '# Active_by_rookie_mdrt:7-12mth_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='13+ months',]$IDX = 7), silent= T)
+  try((mp[mp$SEG=='13+ months',]$kpi = '# Active_by_rookie_mdrt:13+mth_excluded_2GA'), silent= T)
+  try((mp[mp$SEG=='SA',]$IDX = 8), silent= T)
+  try((mp[mp$SEG=='SA',]$kpi = '# Active_by_rookie_mdrt:SA_excluded_2GA'), silent= T)
+  
+  rbind(
+  mp %>% 
+    dplyr::mutate(time_view=strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::mutate(territory=TERRITORY) %>% 
+    dplyr::arrange(territory, IDX) %>% 
+    dplyr::select(-BUSSINESSDATE, -TERRITORY, -SEG, -IDX)
+  ,
+  # total
+  mp %>% dplyr::group_by(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory=TERRITORY) %>% 
+    dplyr::summarise(value=sum(value)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi='# Active_by_rookie_mdrt:Total_excluded_2GA')
+  ,
+  # total_exclude_sa
+  mp %>% 
+    dplyr::filter(SEG!='SA') %>% 
+    dplyr::group_by(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory=TERRITORY) %>% 
+    dplyr::summarise(value=sum(value)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi='# Active_by_rookie_mdrt:Total (excl. SA)_excluded_2GA')
+  ) %>% dplyr::mutate(level='TERRITORY')
+}
+
+
 Activity_Ratio <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
   if(!inherits(bssdt, "Date")) {
     message ("date parameter should be a Date type")
@@ -1852,7 +2615,7 @@ Activity_Ratio_1.2 <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION
     dplyr::select(AGENT_CODE, SEG) %>% 
     dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
   
-  mp = get_Manpower(bssdt, included_ter_ag = F, dbfile) %>% 
+  mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
     dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
     dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
     dplyr::mutate(MDIFF = as.integer(round((
@@ -1997,6 +2760,91 @@ Activity_Ratio_1.2 <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION
     dplyr::select(-SEG, -IDX, -SEG, -MS, -ME, -ACT, -AR) 
     
 }
+Activity_Ratio_1.3_TOTAL <- function(bssdt, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  # --------------------------------------------#
+  #                                             #
+  # Châu yều cầu the activity ratio non SA      #
+  #                                             #
+  # --------------------------------------------#
+  #
+  # hien tai function nay cho cung ket qua voi phien ban 1.1
+  # dang can bo sung phan ytd cho activity ratio
+  # bang cach get man power full year
+  #
+  if(!inherits(bssdt, "Date")) {
+    message("date parameter should be a Date type")
+    stop()
+  }
+  
+  mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    merge(x=., y=rbind(genlion,sa), by.x='AGENT_CODE', by.y='AGENT_CODE', all.x=T)
+  
+  
+  
+  
+  mp = rbind(
+    # group by territory
+    mp %>% 
+      dplyr::mutate(MS=ifelse(MONTHSTART=='Yes', 1, 0)) %>% 
+      dplyr::mutate(ME=ifelse(MONTHEND=='Yes', 1, 0)) %>% 
+      dplyr::mutate(ACT=ifelse(ACTIVESP=='Yes', 1, 0)) %>% 
+      dplyr::group_by(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory=TERRITORY) %>% 
+      dplyr::summarise(MS=sum(MS), ME=sum(ME), ACT=sum(ACT)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(AR=ACT*2/(MS+ME)) %>% 
+      dplyr::mutate(SEG='TOTAL') %>% dplyr::mutate(level='TERRITORY')
+    ,
+    # group by territory excludes SA
+    mp %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::mutate(MS=ifelse(MONTHSTART=='Yes', 1, 0)) %>% 
+      dplyr::mutate(ME=ifelse(MONTHEND=='Yes', 1, 0)) %>% 
+      dplyr::mutate(ACT=ifelse(ACTIVESP=='Yes', 1, 0)) %>% 
+      dplyr::group_by(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory=TERRITORY) %>% 
+      dplyr::summarise(MS=sum(MS), ME=sum(ME), ACT=sum(ACT)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(AR=ACT*2/(MS+ME)) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA') %>% dplyr::mutate(level='TERRITORY')
+    ,
+    # group by country
+    mp %>% 
+      dplyr::mutate(MS=ifelse(MONTHSTART=='Yes', 1, 0)) %>% 
+      dplyr::mutate(ME=ifelse(MONTHEND=='Yes', 1, 0)) %>% 
+      dplyr::mutate(ACT=ifelse(ACTIVESP=='Yes', 1, 0)) %>% 
+      dplyr::group_by(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory='COUNTRY') %>% 
+      dplyr::summarise(MS=sum(MS), ME=sum(ME), ACT=sum(ACT)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(AR=ACT*2/(MS+ME)) %>% 
+      dplyr::mutate(SEG='TOTAL') %>% dplyr::mutate(level='COUNTRY')
+    , # country ytd
+    # group by territory excludes SA
+    mp %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::mutate(MS=ifelse(MONTHSTART=='Yes', 1, 0)) %>% 
+      dplyr::mutate(ME=ifelse(MONTHEND=='Yes', 1, 0)) %>% 
+      dplyr::mutate(ACT=ifelse(ACTIVESP=='Yes', 1, 0)) %>% 
+      dplyr::group_by(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory='COUNTRY') %>% 
+      dplyr::summarise(MS=sum(MS), ME=sum(ME), ACT=sum(ACT)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(AR=ACT*2/(MS+ME)) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA') %>% dplyr::mutate(level='COUNTRY')
+  ) 
+  
+  # create index
+  mp['kpi']=0
+  mp[mp$SEG=='TOTAL_EXCL_SA',]$kpi = 'Activity Ratio_by_rookie_mdrt:Total_Excl_SA'
+  mp[mp$SEG=='TOTAL',]$kpi = 'Activity Ratio_by_rookie_mdrt:Total'
+  
+  mp %>% 
+    dplyr::mutate(value=AR) %>% 
+    dplyr::select(-SEG, -MS, -ME, -ACT, -AR) 
+    
+}
 
 Ending_MP <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
   if(!inherits(bssdt, "Date")) {
@@ -2137,11 +2985,242 @@ Recruitment <- function(bssdt, dbfile = 'KPI_PRODUCTION/main_database.db'){
   )
 }
 
+apply_SEG <- function(values, seg_var, seg_def, idx = F) {
+  sapply(
+    values
+    ,
+    FUN = function(val) {
+      eval(parse(text = (paste(seg_var, val, sep = "="))))
+      return = ''
+      if (!is.na(eval(parse(text = seg_var)))) {
+        for (s in seg_def) {
+          if (eval(parse(text = s))) {
+            return = ifelse(!idx,s, which(seg_def == s)) # index of vector element)
+          }
+        }
+      }
+      return
+    }
+  )
+}	
 
-# APE ---------------------------------------------------------------------
+
+SEGMENT_AGENTS_IN_SA_GENLION_MDRT_ROOKIE_2.3_4.6_7.12_13UPMONTHS_lv.COUNTRY <- function(bssdt, genlion_final_dt, dbfile) {
+  SEGMENT_AGENTS_IN_SA_GENLION_MDRT_ROOKIE_2.3_4.6_7.12_13UPMONTHS_lv.TERRITORY(bssdt, genlion_final_dt, dbfile) %>% 
+    dplyr::mutate(
+      territory = 'COUNTRY', level = 'COUNTRY'
+    )
+}
+  
+  
+# SEGMENT_AGENTS(as.Date('2017-09-30'), as.Date('2017-06-30'), 'D:\\workspace_data_processing\\gvl_data_utilities\\KPI_PRODUCTION\\main_database.db')
+SEGMENT_AGENTS_IN_SA_GENLION_MDRT_ROOKIE_2.3_4.6_7.12_13UPMONTHS_lv.TERRITORY_delete <- function(bssdt, genlion_final_dt, dbfile, index_from = 0) {
+  genlion_final_dt = generate_last_day_of_q1(bssdt)
+  if(!inherits(bssdt, "Date")) {
+    message("date parameter should be a Date type")
+    stop()
+  }
+  if(!inherits(genlion_final_dt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  # phân loại agent theo nhóm sa, genlion, rookie... theo thứ tự ưu tiên từ cao đến thấp.
+  sa = get_Manpower_sa(bssdt, dbfile) %>% 
+    dplyr::mutate(SEG='SA') %>% 
+    dplyr::select(AGENT_CODE, SEG)
+  
+  if (bssdt >= as.Date('2017-04-30')) {
+    genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+      dplyr::mutate(SEG = 'GENLION') %>% 
+      dplyr::select(AGENT_CODE, SEG) %>% 
+      dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
+  } else {
+    genlion <- get_Manpower_MDRT(bssdt, dbfile) %>% 
+      dplyr::select(AGENT_CODE) %>% 
+      dplyr::mutate(SEG = 'GENLION') # TRUOC 20170430 THI DAY LA MDRT NHUNG DE GENLION TUONG TRUNG
+  }
+  # if (nrow(genlion) == 0) {
+  #   warning(sprintf('Genlion of business date: %s - has no data', bssdt))
+  #   stop()
+  # }
+  
+  mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    merge(x=., y=rbind(genlion,sa), by.x='AGENT_CODE', by.y='AGENT_CODE', all.x=T)
+  
+  if (!'SEG' %in% names(mp)) {
+    mp[,'SEG'] = NA
+  }
+  
+  mp[is.na(mp$SEG) & mp$MDIFF==0,]$SEG='Rookie in month'
+  mp[is.na(mp$SEG) & mp$MDIFF==1,]$SEG='Rookie last month'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(2:3),]$SEG='2-3 months'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(4:6),]$SEG='4-6 months'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(7:12),]$SEG='7-12 months'
+  mp[is.na(mp$SEG) & mp$MDIFF >= 13,]$SEG='13+ months'
+  
+  # create index
+  try((mp['idx']=0 + index_from), silent = T)
+  try((mp[mp$SEG=='GENLION',]$idx = 1 + index_from), silent = T)
+  try((mp[mp$SEG=='Rookie in month',]$idx = 2 + index_from), silent = T)
+  try((mp[mp$SEG=='Rookie last month',]$idx = 3 + index_from), silent = T)
+  try((mp[mp$SEG=='2-3 months',]$idx = 4 + index_from), silent = T)
+  try((mp[mp$SEG=='4-6 months',]$idx = 5 + index_from), silent = T)
+  try((mp[mp$SEG=='7-12 months',]$idx = 6 + index_from), silent = T)
+  try((mp[mp$SEG=='13+ months',]$idx = 7 + index_from), silent = T)
+  try((mp[mp$SEG=='SA',]$idx = 8 + index_from), silent = T)
+  
+  mp %>% 
+    dplyr::mutate(
+      territory = TERRITORY, level = 'TERRITORY'
+    ) %>% 
+    dplyr::select(SEG, AGENT_CODE, territory, level, idx)
+}
+SEGMENT_AGENTS_IN_SA_GENLION_MDRT_ROOKIE_2.3_4.6_7.12_13UPMONTHS_lv.TERRITORY <- function(bssdt, genlion_final_dt, dbfile, index_from = 0) {
+  genlion_final_dt = generate_last_day_of_q1(bssdt)
+  if(!inherits(bssdt, "Date")) {
+    message("date parameter should be a Date type")
+    stop()
+  }
+  if(!inherits(genlion_final_dt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  # phân loại agent theo nhóm sa, genlion, rookie... theo thứ tự ưu tiên từ cao đến thấp.
+  sa = get_Manpower_sa(bssdt, dbfile) %>% 
+    dplyr::mutate(SEG='SA') %>% 
+    dplyr::select(AGENT_CODE, SEG)
+  
+  if (bssdt >= as.Date('2017-04-30')) {
+    genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+      dplyr::mutate(SEG = 'GENLION') %>% 
+      dplyr::select(AGENT_CODE, SEG) %>% 
+      dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
+  } else {
+    genlion <- get_Manpower_MDRT(bssdt, dbfile) %>% 
+      dplyr::select(AGENT_CODE) %>% 
+      dplyr::mutate(SEG = 'GENLION') # TRUOC 20170430 THI DAY LA MDRT NHUNG DE GENLION TUONG TRUNG
+  }
+  # if (nrow(genlion) == 0) {
+  #   warning(sprintf('Genlion of business date: %s - has no data', bssdt))
+  #   stop()
+  # }
+  
+  mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    merge(x=., y=rbind(genlion,sa), by.x='AGENT_CODE', by.y='AGENT_CODE', all.x=T)
+  
+  if (!'SEG' %in% names(mp)) {
+    mp[,'SEG'] = NA
+  }
+  
+  try((mp[is.na(mp$SEG) & mp$MDIFF==0,]$SEG='Rookie in month'), silent = T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF==1,]$SEG='Rookie last month'), silent = T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF %in% c(2:3),]$SEG='2-3 months'), silent = T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF %in% c(4:6),]$SEG='4-6 months'), silent = T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF %in% c(7:12),]$SEG='7-12 months'), silent = T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF >= 13,]$SEG='13+ months'), silent = T)
+  
+  # create index
+  mp = dplyr::mutate(mp, idx=(0 + index_from))
+  # try((mp['idx']=0 + index_from), silent = T)
+  try((mp[mp$SEG=='GENLION',]$idx = 1 + index_from), silent = T)
+  try((mp[mp$SEG=='Rookie in month',]$idx = 2 + index_from), silent = T)
+  try((mp[mp$SEG=='Rookie last month',]$idx = 3 + index_from), silent = T)
+  try((mp[mp$SEG=='2-3 months',]$idx = 4 + index_from), silent = T)
+  try((mp[mp$SEG=='4-6 months',]$idx = 5 + index_from), silent = T)
+  try((mp[mp$SEG=='7-12 months',]$idx = 6 + index_from), silent = T)
+  try((mp[mp$SEG=='13+ months',]$idx = 7 + index_from), silent = T)
+  try((mp[mp$SEG=='SA',]$idx = 8 + index_from), silent = T)
+  
+  mp %>% 
+    dplyr::mutate(
+      territory = TERRITORY, level = 'TERRITORY'
+    ) %>% 
+    dplyr::select(SEG, AGENT_CODE, territory, level, idx)
+}
+
+# delete ----
+# SEGMENT_UM_SUM_BM_SBM <- function(bssdt, dbfile) {
+#   if(!inherits(bssdt, "Date")) {
+#     message("date parameter should be a Date type")
+#     stop()
+#   }
+#   mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
+#     dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+#     dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+#     dplyr::mutate(MDIFF = as.integer(round((
+#       as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+#     ) * 12))) 
+#   my_database <- src_sqlite(dbfile, create = TRUE)
+#   SQL <- "select ul.AGENT_CODE, ul.UNIT_CODE from RAWDATA_UnitList ul"
+#   result <- dbSendQuery(my_database$con, SQL)
+#   unitlist = fetch(result, encoding="utf-8")
+#   dbClearResult(result)
+#   mp %>% merge(
+#     x = .
+#     ,
+#     y = unitlist
+#     ,
+#     by.x = 'AGENT_CODE'
+#     ,
+#     by.y = 'AGENT_CODE'
+#   ) %>% 
+#     dplyr::mutate(SEG = ifelse(!is.na(STAFFCD) & STAFFCD != '', STAFFCD, AGENT_DESIGNATION)) %>% 
+#     dplyr::mutate(time_view =  as.Date(as.character(BUSSINESSDATE), '%Y-%m-%d')) %>% # convert to date
+#     dplyr::mutate(time_view = paste(strftime(time_view, '%Y'), quarters(time_view), sep = "-")) %>% 
+#     dplyr::select(time_view, UNIT_CODE, SEG)
+#}
+
+SEGMENT_AGENTS_IN_GAHCM2_GATIENGIANG1_OTHERS <- function(bssdt, dbfile){
+  if(!inherits(bssdt, "Date")) {
+    message("date parameter should be a Date type")
+    stop()
+  }
+  mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) 
+  
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- "select OFFICECD, OFFICE_NAME from RAWDATA_GATotal where OFFICE_NAME in ('003 GA HCM 2', '010 GA TIỀN GIANG 1')"
+  result <- dbSendQuery(my_database$con, SQL)
+  GA_info = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  
+  re = mp %>% merge(
+    x = .
+    ,
+    y = GA_info
+    ,
+    by.x = 'OFFICECD'
+    ,
+    by.y = 'OFFICECD'
+    ,
+    all.x = TRUE
+  ) %>% 
+    dplyr::mutate(
+      territory = TERRITORY, level = 'TERRITORY', 
+      SEG = ifelse(is.na(OFFICE_NAME), 'OTHERS', OFFICECD),
+      SEG_DESC = ifelse(is.na(OFFICE_NAME), 'OTHERS', OFFICE_NAME)
+      ) %>% 
+    dplyr::select(SEG, AGENT_CODE, territory, level)
+  re
+}
+
 APE <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
   if(!inherits(bssdt, "Date")) {
-    message ("date parameter should be a Date type")
+    message("date parameter should be a Date type")
     stop()
   }
   if(!inherits(genlion_final_dt, "Date")) {
@@ -2252,6 +3331,793 @@ APE <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.
     dplyr::select(-BUSSINESSDATE, -TERRITORY, -SEG, -APE, -IDX) %>% 
     dplyr::mutate(level='TERRITORY')
 }
+APE1.1 <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  mp = SEGMENT_AGENTS_IN_SA_GENLION_MDRT_ROOKIE_2.3_4.6_7.12_13UPMONTHS_lv.TERRITORY(bssdt, genlion_final_dt, dbfile)
+  
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile)
+  ape = dplyr::filter(kpi, kpi$APE != 0) %>% dplyr::select(time_view, AGCODE, APE)
+  ultp = dplyr::filter(kpi, kpi$SACSTYP=='EP') %>% dplyr::select(time_view, AGCODE, ULTP)
+  
+  mp_ape = mp %>% 
+    merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+    dplyr::group_by(time_view, territory, SEG, level='TERRITORY') %>% 
+    dplyr::summarise(APE=sum(APE)) %>% 
+    dplyr::ungroup(.)
+  mp_ultp = mp %>% 
+    merge(x=., y=ultp, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+    dplyr::group_by(time_view, territory, level='TERRITORY') %>% 
+    dplyr::summarise(APE=sum(ULTP)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(SEG='', kpi='APE_by_rookie_mdrt:SP 100%')
+  
+  # CREATE KPI
+  mp_ape['kpi']=''
+  mp_ape[mp_ape$SEG=='GENLION',]$kpi = 'APE_by_rookie_mdrt:MDRT'
+  mp_ape[mp_ape$SEG=='Rookie in month',]$kpi = 'APE_by_rookie_mdrt:Rookie in month'
+  mp_ape[mp_ape$SEG=='Rookie last month',]$kpi = 'APE_by_rookie_mdrt:Rookie last month'
+  mp_ape[mp_ape$SEG=='2-3 months',]$kpi = 'APE_by_rookie_mdrt:2-3 months'
+  mp_ape[mp_ape$SEG=='4-6 months',]$kpi = 'APE_by_rookie_mdrt:4 - 6 mths'
+  mp_ape[mp_ape$SEG=='7-12 months',]$kpi = 'APE_by_rookie_mdrt:7-12mth'
+  mp_ape[mp_ape$SEG=='13+ months',]$kpi = 'APE_by_rookie_mdrt:13+mth'
+  mp_ape[mp_ape$SEG=='SA',]$kpi = 'APE_by_rookie_mdrt:SA'
+  
+  ape = rbind(
+    mp_ape
+    , 
+    mp_ape %>% 
+      dplyr::group_by(time_view, territory = 'COUNTRY', SEG, level='COUNTRY', kpi) %>% 
+      dplyr::summarise(APE=sum(APE)) %>% 
+      dplyr::ungroup(.)
+    , 
+    mp_ultp 
+    ,
+    mp_ultp %>% 
+      dplyr::group_by(time_view, territory = 'COUNTRY', SEG, level='COUNTRY', kpi) %>% 
+      dplyr::summarise(APE=sum(APE)) %>% 
+      dplyr::ungroup(.)
+    ,
+    mp_ape %>% 
+    dplyr::group_by(time_view, territory, level='TERRITORY') %>% 
+    dplyr::summarise(APE=sum(APE)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi='APE_by_rookie_mdrt:Total', SEG='')
+    ,
+    mp_ape %>% 
+    dplyr::group_by(time_view, territory = 'COUNTRY', level='COUNTRY') %>% 
+    dplyr::summarise(APE=sum(APE)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi='APE_by_rookie_mdrt:Total', SEG='')
+    ,
+    # sum ape + 10%ultp
+    mp_ultp %>% 
+      dplyr::mutate(APE=APE*0.1) %>% 
+      rbind(., mp_ape) %>% 
+      dplyr::group_by(time_view, territory, level='TERRITORY') %>% 
+      dplyr::summarise(APE=sum(APE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(kpi='APE_total_mdrt_rookie_sa_10%sp', SEG='')
+    ,
+    # sum ape + 10%ultp
+    mp_ultp %>% 
+      dplyr::mutate(APE=APE*0.1) %>% 
+      rbind(., mp_ape) %>% 
+      dplyr::group_by(time_view, territory = 'COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(APE=sum(APE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(kpi='APE_total_mdrt_rookie_sa_10%sp', SEG='')
+    
+  )
+  
+  ape %>% 
+    dplyr::mutate(value=APE/10^6) %>% 
+    dplyr::select(-SEG, -APE)
+    
+}
+ape_individual_10per_topup_incl <- function(bssdt, dbfile){
+  ad = AD_LIST(dbfile) %>% dplyr::select( ADCODE, ADNAME)
+  territory = territory_mapping(dbfile) %>% dplyr::select(-REGION_NAME)
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile)
+  ape = dplyr::filter(kpi, kpi$APE != 0) %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, APE)
+  ultp = dplyr::filter(kpi, kpi$SACSTYP=='EP') %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, ULTP)
+  
+  ape = rbind(
+    ape
+    , 
+    ultp %>% 
+      dplyr::mutate(APE=ULTP*0.1) %>% 
+      dplyr::select(-ULTP)
+  )
+  ape %>%  
+    merge(x=.,y=territory, by.x='REGIONCD', by.y='REGION_CODE', all.x=T) %>% 
+    merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME)
+}
+ape_individual_10per_topup_incl_fullyear <- function(yyyy, dbfile){
+  ad = AD_LIST(dbfile) %>% dplyr::select( ADCODE, ADNAME)
+  territory = territory_mapping(dbfile) %>% dplyr::select(-REGION_NAME)
+  kpi = get_kpi(sprintf('%s%s', yyyy, '%'), dbfile)
+  ape = dplyr::filter(kpi, kpi$APE != 0) %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, APE)
+  ultp = dplyr::filter(kpi, kpi$SACSTYP=='EP') %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, ULTP)
+  
+  ape = rbind(
+    ape
+    , 
+    ultp %>% 
+      dplyr::mutate(APE=ULTP*0.1) %>% 
+      dplyr::select(-ULTP)
+  )
+  ape %>%  
+    merge(x=.,y=territory, by.x='REGIONCD', by.y='REGION_CODE', all.x=T) %>% 
+    merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME)
+}
+ape_individual <- function(bssdt, dbfile){
+  ad = AD_LIST(dbfile) %>% dplyr::select( ADCODE, ADNAME)
+  territory = territory_mapping(dbfile) %>% dplyr::select(-REGION_NAME)
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile)
+  ape = dplyr::filter(kpi, kpi$APE != 0) %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, APE)
+  ape %>% 
+    merge(x=.,y=territory, by.x='REGIONCD', by.y='REGION_CODE', all.x=T) %>% 
+    merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME)
+}
+
+product_mix_individual <- function(bssdt, dbfile) {
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile)
+  ape = dplyr::filter(kpi, kpi$APE != 0) %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, PRODUCTCODE, APE)
+  
+  products = all_product(dbfile)
+  
+  ape %>% 
+    merge(x=., y=products, by.x='PRODUCTCODE', by.y='PRODUCTCODE') 
+}
+
+fyp_individual_10per_topup_incl <- function(bssdt, dbfile){
+  ad = AD_LIST(dbfile) %>% dplyr::select( ADCODE, ADNAME)
+  territory = territory_mapping(dbfile) %>% dplyr::select(-REGION_NAME)
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile)
+  fyp = kpi %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, FYP)
+  # fyp = dplyr::filter(kpi, kpi$FYP != 0) %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, FYP)
+  ultp = dplyr::filter(kpi, kpi$SACSTYP=='EP') %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, ULTP)
+  
+  fyp = rbind(
+    fyp
+    , 
+    ultp %>% 
+      dplyr::mutate(FYP=ULTP*0.1) %>% 
+      dplyr::select(-ULTP)
+  )
+  fyp %>%  
+    merge(x=.,y=territory, by.x='REGIONCD', by.y='REGION_CODE', all.x=T) %>% 
+    merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME)
+}
+
+fyp_individual_10per_topup_incl_fullyear <- function(yyyy, dbfile){
+  ad = AD_LIST(dbfile) %>% dplyr::select( ADCODE, ADNAME)
+  territory = territory_mapping(dbfile) %>% dplyr::select(-REGION_NAME)
+  kpi = get_kpi(sprintf('%s%s', yyyy, '%'), dbfile)
+  fyp = dplyr::filter(kpi, kpi$FYP != 0) %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, FYP)
+  ultp = dplyr::filter(kpi, kpi$SACSTYP=='EP') %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, ULTP)
+  
+  fyp = rbind(
+    fyp
+    , 
+    ultp %>% 
+      dplyr::mutate(FYP=ULTP*0.1) %>% 
+      dplyr::select(-ULTP)
+  )
+  fyp %>%  
+    merge(x=.,y=territory, by.x='REGIONCD', by.y='REGION_CODE', all.x=T) %>% 
+    merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME)
+}
+fyp_individual <- function(bssdt, dbfile){
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile)
+  fyp = dplyr::filter(kpi, kpi$FYP != 0) %>% dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, FYP)
+  fyp
+}
+case_individual <- function(bssdt, dbfile){
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile)
+  baseproduct = get_base_productcd(dbfile)
+  dplyr::filter(kpi, kpi$CASE != 0) %>% 
+    merge(x=., y=baseproduct, by.x='PRODUCTCODE', by.y='PRODUCTCODE') %>% 
+    dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, CASE)
+}
+case_individual_fullyear <- function(yyyy, dbfile){
+  ad = AD_LIST(dbfile) %>% dplyr::select( ADCODE, ADNAME)
+  territory = territory_mapping(dbfile) %>% dplyr::select(-REGION_NAME)
+  kpi = get_kpi(sprintf('%s%s', yyyy, '%'), dbfile)
+  baseproduct = get_base_productcd(dbfile)
+  dplyr::filter(kpi, kpi$CASE != 0) %>% 
+    merge(x=., y=baseproduct, by.x='PRODUCTCODE', by.y='PRODUCTCODE') %>% 
+    dplyr::select(time_view, REGIONCD, ZONECD, OFFICECD, TEAMCD, AGCODE, CASE) %>%  
+    merge(x=.,y=territory, by.x='REGIONCD', by.y='REGION_CODE', all.x=T) %>% 
+    merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
+    merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
+    dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME)
+}
+APE_exclude_GA_for_meeting_purpose_only <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- "
+    select OFFICECD from RAWDATA_GATotal where OFFICE_NAME in ('003 GA HCM 2', '010 GA TIỀN GIANG 1')
+    "
+  result <- dbSendQuery(my_database$con, SQL)
+  excluded_GA = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+    
+  if(!inherits(bssdt, "Date")) {
+    message("date parameter should be a Date type")
+    stop()
+  }
+  if(!inherits(genlion_final_dt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  # phân loại agent theo nhóm sa, genlion, rookie... theo thứ tự ưu tiên từ cao đến thấp.
+  sa = get_Manpower_sa(bssdt, dbfile) %>% 
+    dplyr::mutate(SEG='SA') %>% 
+    dplyr::select(AGENT_CODE, SEG)
+  
+  # genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+  #   dplyr::mutate(SEG='GENLION') %>% 
+  #   dplyr::select(AGENT_CODE, SEG) %>% 
+  #   dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
+  # if (nrow(genlion) == 0) {
+  #   warning(sprintf('Genlion of business date: %s - has no data', bssdt))
+  #   stop()
+  # }
+  if (bssdt >= as.Date('2017-04-30')) {
+    genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+      dplyr::mutate(SEG = 'GENLION') %>% 
+      dplyr::select(AGENT_CODE, SEG) %>% 
+      dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
+  } else {
+    genlion <- get_Manpower_MDRT(bssdt, dbfile) %>% 
+      dplyr::select(AGENT_CODE) %>% 
+      dplyr::mutate(SEG = 'GENLION') # TRUOC 20170430 THI DAY LA MDRT NHUNG DE GENLION TUONG TRUNG
+  }
+  
+  mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    merge(x=., y=rbind(genlion,sa), by.x='AGENT_CODE', by.y='AGENT_CODE', all.x=T)
+  
+  mp[is.na(mp$SEG) & mp$MDIFF==0,]$SEG='Rookie in month'
+  mp[is.na(mp$SEG) & mp$MDIFF==1,]$SEG='Rookie last month'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(2:3),]$SEG='2-3 months'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(4:6),]$SEG='4-6 months'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(7:12),]$SEG='7-12 months'
+  mp[is.na(mp$SEG) & mp$MDIFF >= 13,]$SEG='13+ months'
+  
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile) %>% dplyr::filter(!OFFICECD %in% excluded_GA$OFFICECD)
+  ape = dplyr::filter(kpi, kpi$APE != 0) %>% 
+    dplyr::select(AGCODE, APE)
+  ultp = dplyr::filter(kpi, kpi$SACSTYP=='EP') %>% dplyr::select(AGCODE, ULTP)
+  
+  mp_ape = mp %>% 
+    merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+    dplyr::group_by(BUSSINESSDATE, TERRITORY, SEG) %>% 
+    dplyr::summarise(APE=sum(APE)/10^6) %>% 
+    dplyr::ungroup(.)
+  mp_ultp = mp %>% 
+    merge(x=., y=ultp, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+    dplyr::group_by(BUSSINESSDATE, TERRITORY) %>% 
+    dplyr::summarise(APE=sum(ULTP)/10^6) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(SEG='', kpi='APE_by_rookie_mdrt:SP 100%_excluded_2GA')
+  
+  # create index
+  try((mp_ape['IDX']=0), silent=T)
+  try((mp_ape[mp_ape$SEG=='GENLION',]$IDX = 1), silent=T)
+  try((mp_ape[mp_ape$SEG=='Rookie in month',]$IDX = 2), silent=T)
+  try((mp_ape[mp_ape$SEG=='Rookie last month',]$IDX = 3), silent=T)
+  try((mp_ape[mp_ape$SEG=='2-3 months',]$IDX = 4), silent=T)
+  try((mp_ape[mp_ape$SEG=='4-6 months',]$IDX = 5), silent=T)
+  try((mp_ape[mp_ape$SEG=='7-12 months',]$IDX = 6), silent=T)
+  try((mp_ape[mp_ape$SEG=='13+ months',]$IDX = 7), silent=T)
+  try((mp_ape[mp_ape$SEG=='SA',]$IDX = 8), silent=T)
+  
+  # CREATE KPI
+  try((mp_ape['kpi']=''), silent= T)
+  try((mp_ape[mp_ape$SEG=='GENLION',]$kpi = 'APE_by_rookie_mdrt:MDRT_excluded_2GA'), silent= T)
+  try((mp_ape[mp_ape$SEG=='Rookie in month',]$kpi = 'APE_by_rookie_mdrt:Rookie in month_excluded_2GA'), silent= T)
+  try((mp_ape[mp_ape$SEG=='Rookie last month',]$kpi = 'APE_by_rookie_mdrt:Rookie last month_excluded_2GA'), silent= T)
+  try((mp_ape[mp_ape$SEG=='2-3 months',]$kpi = 'APE_by_rookie_mdrt:2-3 months_excluded_2GA'), silent= T)
+  try((mp_ape[mp_ape$SEG=='4-6 months',]$kpi = 'APE_by_rookie_mdrt:4 - 6 mths_excluded_2GA'), silent= T)
+  try((mp_ape[mp_ape$SEG=='7-12 months',]$kpi = 'APE_by_rookie_mdrt:7-12mth_excluded_2GA'), silent= T)
+  try((mp_ape[mp_ape$SEG=='13+ months',]$kpi = 'APE_by_rookie_mdrt:13+mth_excluded_2GA'), silent= T)
+  try((mp_ape[mp_ape$SEG=='SA',]$kpi = 'APE_by_rookie_mdrt:SA_excluded_2GA'), silent= T)
+  
+  ape = rbind(
+    mp_ape
+    , 
+    mp_ultp %>% dplyr::mutate(IDX=9)
+    ,
+    # 
+    # sum MDRT/ GEN Lion (from Apr '17)
+    # Rookie in month
+    # Rookie last month
+    # 2-3 months
+    # 4 - 6 mths
+    # 7-12mth
+    # 13+mth
+    # SA
+    #
+    mp_ape %>% 
+    dplyr::group_by(BUSSINESSDATE, TERRITORY) %>% 
+    dplyr::summarise(APE=sum(APE)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(kpi='APE_by_rookie_mdrt:Total_excluded_2GA', SEG='', IDX=10)
+    ,
+    # sum ape + 10%ultp
+    mp_ultp %>% 
+      dplyr::mutate(APE=APE*0.1) %>% 
+      rbind(., mp_ape[,-grep('IDX', names(mp_ape))]) %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY) %>% 
+      dplyr::summarise(APE=sum(APE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(kpi='APE_total_mdrt_rookie_sa_10%sp_excluded_2GA', SEG='', IDX=11)
+    
+  )
+  
+  ape %>% dplyr::arrange(TERRITORY, IDX) %>% 
+    dplyr::mutate(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory=TERRITORY, value=APE) %>% 
+    dplyr::select(-BUSSINESSDATE, -TERRITORY, -SEG, -APE, -IDX) %>% 
+    dplyr::mutate(level='TERRITORY')
+}
+APE_GAHCM2_GATIENGIANG1_OTHERS <- function(bssdt, dbfile) {
+  seg = SEGMENT_AGENTS_IN_GAHCM2_GATIENGIANG1_OTHERS(bssdt, dbfile)
+  ape = indi_APE_mtd_include_SP_10percent(bssdt, dbfile) %>%  dplyr::mutate(time_view = strftime(as.Date(strptime(BUSSINESSDATE, '%Y%m%d')), '%Y%m'))
+  seg %>% merge(x = ., y = ape, by.x = 'AGENT_CODE', by.y = 'AGCODE', all.y = T) %>% 
+    dplyr::group_by(time_view, territory, level, SEG) %>% 
+    dplyr::summarise(value = sum(APE, na.rm = TRUE)/10^6)  %>% 
+    dplyr::filter(territory == 'SOUTH') %>% 
+    dplyr::ungroup() %>% 
+    dplyr::mutate(kpi = ifelse(SEG == 'OTHERS', '10234_10266_OTHERS', SEG)) %>% 
+    dplyr::mutate(kpi = paste('APE', kpi, sep = '_')) %>% 
+    dplyr::select(-SEG) 
+}
+# APE_total_include_SP_10percent_lv.TERRITORY(as.Date('2017-09-30'), as.Date('2017-06-30'), 'D:\\workspace_data_processing\\gvl_data_utilities\\KPI_PRODUCTION\\main_database.db')
+APE_total_include_SP_10percent_lv.TERRITORY <- function(bssdt, genlion_final_dt, dbfile) {
+  seg = SEGMENT_AGENTS_IN_SA_GENLION_MDRT_ROOKIE_2.3_4.6_7.12_13UPMONTHS_lv.TERRITORY(bssdt, genlion_final_dt, dbfile)
+  ape = indi_APE_mtd_include_SP_10percent(bssdt, dbfile) %>%  dplyr::mutate(time_view = strftime(as.Date(strptime(BUSSINESSDATE, '%Y%m%d')), '%Y%m'))
+  seg %>% merge(x = ., y = ape, by.x = 'AGENT_CODE', by.y = 'AGCODE', all.y = T) %>% 
+    dplyr::group_by(time_view, territory, level, SEG) %>% 
+    dplyr::summarise(value = sum(APE, na.rm = TRUE)/10^6)  %>% 
+    dplyr::ungroup() %>% 
+    dplyr::mutate(kpi = SEG) %>% 
+    dplyr::select(-SEG) 
+}
+APE_total_include_SP_10percent_lv.COUNTRY <- function(bssdt, genlion_final_dt, dbfile) {
+  ape = indi_APE_mtd_include_SP_10percent(bssdt, dbfile) %>%  dplyr::mutate(time_view = strftime(as.Date(strptime(BUSSINESSDATE, '%Y%m%d')), '%Y%m'))
+  ape %>% dplyr::group_by(time_view) %>% 
+    dplyr::summarise(value = sum(APE, na.rm = TRUE)/10^6)  %>% 
+    dplyr::ungroup() 
+}
+
+ape_country <- function(yyyy, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf("
+    select time_view, value from kpi_segmentation where time_view like '%s' 
+    and kpi = '%s' 
+    and territory = 'COUNTRY' and level = 'COUNTRY'
+    ", 
+    paste(yyyy, '%', sep=''), 'APE_total_mdrt_rookie_sa_10%sp')
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  if (nrow(data)) {
+    re = rbind(
+      data
+      ,
+      data %>% 
+        dplyr::group_by(time_view=yyyy) %>% 
+        dplyr::summarise(value = sum(value)) %>% 
+        dplyr::ungroup()
+      ) %>% 
+      dplyr::mutate(kpi = sprintf('APE-%s-%s', yyyy, 'COUNTRY'))
+    re = re %>% tidyr::spread(time_view, value)
+    try((rownames(re) <- re$kpi), silent=T)
+    re
+  } else {
+    data
+  }
+}
+# casesize_country <- function(yyyy, dbfile) {
+#   my_database <- src_sqlite(dbfile, create = TRUE)
+#   SQL <- sprintf("
+#     select time_view, value from kpi_segmentation where time_view like '%s' 
+#     and kpi = '%s' 
+#     and territory = 'COUNTRY' and level = 'COUNTRY'
+#     ", 
+#     paste(yyyy, '%', sep=''), 'CaseSize_by_rookie_mdrt:Total')
+#   result <- dbSendQuery(my_database$con, SQL)
+#   data = fetch(result, encoding="utf-8")
+#   dbClearResult(result)
+#   if (nrow(data)) {
+#     re = data %>% 
+#       dplyr::mutate(kpi = sprintf('CASESIZE-%s-%s', yyyy, 'COUNTRY'))
+#     re = re %>% tidyr::spread(time_view, value)
+#     try((rownames(re) <- re$kpi), silent=T)
+#     re
+#   } else {
+#     data
+#   }
+# }
+ape_territory <- function(yyyy, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf("
+    select time_view, territory, value from kpi_segmentation where time_view like '%s' 
+    and kpi = '%s' 
+    and level = 'TERRITORY'
+    ", 
+                 paste(yyyy, '%', sep=''), 'APE_total_mdrt_rookie_sa_10%sp')
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  if (nrow(data)) {
+    re = rbind(
+      data
+      ,
+      data %>% 
+        dplyr::group_by(time_view=yyyy, territory) %>% 
+        dplyr::summarise(value = sum(value)) %>% 
+        dplyr::ungroup()
+      
+    ) %>% 
+      dplyr::mutate(kpi = sprintf('APE-%s-%s', yyyy, territory))
+    re = re %>% tidyr::spread(time_view, value)
+    try((rownames(re) <- re$kpi), silent=T)
+    re
+  } else {
+    data
+  }
+}
+# casesize_territory <- function(yyyy, dbfile) {
+#   my_database <- src_sqlite(dbfile, create = TRUE)
+#   SQL <- sprintf("
+#     select time_view, territory, value from kpi_segmentation where time_view like '%s' 
+#     and kpi = '%s' 
+#     and level = 'TERRITORY'
+#     ", 
+#                  paste(yyyy, '%', sep=''), 'CaseSize_by_rookie_mdrt:Total')
+#   result <- dbSendQuery(my_database$con, SQL)
+#   data = fetch(result, encoding="utf-8")
+#   dbClearResult(result)
+#   if (nrow(data)) {
+#     re = data %>% 
+#       dplyr::mutate(kpi = sprintf('CASESIZE-%s-%s', yyyy, territory))
+#     re = re %>% tidyr::spread(time_view, value)
+#     try((rownames(re) <- re$kpi), silent=T)
+#     re
+#   } else {
+#     data
+#   }
+# }
+active_territory <- function(yyyy, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf("
+    select time_view, territory, value from kpi_segmentation where time_view like '%s' 
+    and kpi = '%s' 
+    and level = 'TERRITORY'
+    ", 
+                 paste(yyyy, '%', sep=''), '# Active_by_rookie_mdrt:Total')
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  if (nrow(data)) {
+    re = rbind(
+      data
+      ,
+      # YTD
+      data %>% 
+        dplyr::group_by(time_view=yyyy, territory) %>% 
+        dplyr::summarise(value = sum(value)) %>% 
+        dplyr::ungroup()
+      ,
+      # COUNTRY
+      data %>% 
+        dplyr::group_by(time_view, territory = 'COUNTRY') %>% 
+        dplyr::summarise(value = sum(value)) %>% 
+        dplyr::ungroup()
+      ,
+      # YTD COUNTRY
+      data %>% 
+        dplyr::group_by(time_view=yyyy, territory = 'COUNTRY') %>% 
+        dplyr::summarise(value = sum(value)) %>% 
+        dplyr::ungroup()
+    ) %>% 
+      dplyr::mutate(kpi = sprintf('ACTIVE-%s-%s', yyyy, territory))
+    re = re %>% tidyr::spread(time_view, value)
+    try((rownames(re) <- re$kpi), silent=T)
+    re
+  } else {
+    data
+  }
+}
+case_territory <- function(yyyy, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf("
+    select time_view, territory, value from kpi_segmentation where time_view like '%s' 
+    and kpi = '%s' 
+    and level = 'TERRITORY'
+    ", 
+                 paste(yyyy, '%', sep=''), '# Case_by_rookie_mdrt:Total')
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  if (nrow(data)) {
+    re = rbind(
+      data
+      ,
+      # YTD
+      data %>% 
+        dplyr::group_by(time_view=yyyy, territory) %>% 
+        dplyr::summarise(value = sum(value)) %>% 
+        dplyr::ungroup()
+      ,
+      # COUNTRY
+      data %>% 
+        dplyr::group_by(time_view, territory = 'COUNTRY') %>% 
+        dplyr::summarise(value = sum(value)) %>% 
+        dplyr::ungroup()
+      ,
+      # YTD COUNTRY
+      data %>% 
+        dplyr::group_by(time_view=yyyy, territory = 'COUNTRY') %>% 
+        dplyr::summarise(value = sum(value)) %>% 
+        dplyr::ungroup()
+    ) %>% 
+      dplyr::mutate(kpi = sprintf('CASE-%s-%s', yyyy, territory))
+    re = re %>% tidyr::spread(time_view, value)
+    try((rownames(re) <- re$kpi), silent=T)
+    re
+  } else {
+    data
+  }
+}
+casesize_territory <- function(yyyy, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf("
+    select time_view, territory, value from kpi_segmentation where time_view like '%s' 
+    and kpi = '%s' 
+    and level = 'TERRITORY'
+    ", 
+                 paste(yyyy, '%', sep=''), '# Case_by_rookie_mdrt:Total')
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  case = rbind(
+    data
+    ,
+    # YTD
+    data %>% 
+      dplyr::group_by(time_view=yyyy, territory) %>% 
+      dplyr::summarise(value = sum(value)) %>% 
+      dplyr::ungroup()
+    ,
+    # COUNTRY
+    data %>% 
+      dplyr::group_by(time_view, territory = 'COUNTRY') %>% 
+      dplyr::summarise(value = sum(value)) %>% 
+      dplyr::ungroup()
+    ,
+    # YTD COUNTRY
+    data %>% 
+      dplyr::group_by(time_view=yyyy, territory = 'COUNTRY') %>% 
+      dplyr::summarise(value = sum(value)) %>% 
+      dplyr::ungroup()
+  ) 
+  #
+  # ape
+  #
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf("
+    select time_view, territory, value from kpi_segmentation where time_view like '%s' 
+    and kpi = '%s' 
+    and level = 'TERRITORY'
+    ", 
+                 paste(yyyy, '%', sep=''), 'APE_total_mdrt_rookie_sa_10%sp')
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  ape = rbind(
+    data
+    ,
+    data %>% 
+      dplyr::group_by(time_view=yyyy, territory) %>% 
+      dplyr::summarise(value = sum(value)) %>% 
+      dplyr::ungroup()
+    , 
+    # country
+    data %>% 
+      dplyr::group_by(time_view, territory = 'COUNTRY') %>% 
+      dplyr::summarise(value = sum(value)) %>% 
+      dplyr::ungroup()
+    ,
+    # country ytd
+    data %>% 
+      dplyr::group_by(time_view=yyyy, territory = 'COUNTRY') %>% 
+      dplyr::summarise(value = sum(value)) %>% 
+      dplyr::ungroup()
+    
+  ) 
+  
+  re = ape %>% 
+    merge(
+      x = .,
+      y = case,
+      by.x = c('time_view', 'territory'),
+      by.y = c('time_view', 'territory')
+    ) %>% 
+    dplyr::mutate(value = value.x/value.y) %>% 
+    dplyr::select(., -grep("*\\.x$|*\\.y$", colnames(.))) %>%  # remove columns that have sufix is ".x" or '.y' (if any)
+    dplyr::mutate(kpi = sprintf('CASESIZE-%s-%s', yyyy, territory))
+  re = re %>% tidyr::spread(time_view, value)
+  try((rownames(re) <- re$kpi), silent=T)
+  re
+}
+fyp_territory <- function(yyyy, dbfile) {
+  #####################################################################
+  # ytd fyp of country at a business date, 10% top up (sp) INCLUDED
+  #####################################################################
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf("
+                  SELECT time_view, territory, value
+                  FROM kpi_segmentation
+                  WHERE time_view LIKE '%s' AND kpi = '%s' 
+                  AND level = 'TERRITORY'
+                 ", 
+                 paste(yyyy, '%', sep=''), 'FYP_by_rookie_mdrt:Total'
+                 )
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  re = rbind(
+    data,
+    data %>% 
+      dplyr::group_by(time_view, territory = 'COUNTRY') %>% 
+      dplyr::summarise(value = sum(value)) %>% 
+      dplyr::ungroup() 
+  )%>% 
+  dplyr::mutate(kpi = sprintf('FYP-%s-%s', yyyy, territory))
+  re = re %>% tidyr::spread(time_view, value)
+  try((rownames(re) <- re$kpi), silent=T)
+  re
+}
+
+# Case_total_lv.COUNTRY <- function(bssdt, dbfile) {
+#   if(!inherits(bssdt, "Date")) {
+#     message ("date parameter should be a Date type")
+#     stop()
+#   }
+#   kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile) 
+#   case = dplyr::filter(kpi, kpi$CASE != 0) %>% 
+#     merge(x=., y=baseproduct, by.x='PRODUCTCODE', by.y='PRODUCTCODE') %>% 
+#     dplyr::select(time_view, CASE) %>% 
+#     dplyr::group_by(time_view) %>% 
+#     dplyr::summarise(value = sum(CASE))
+#   case
+# }
+
+Recruitement_total_lv.COUNTRY <- function(bssdt, dbfile) {
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    dplyr::filter(MDIFF==0) %>% 
+    dplyr::mutate(SEG=NA) %>% 
+    dplyr::mutate(time_view = strftime(BUSSINESSDATE, '%Y%m'))
+  mp %>% 
+    dplyr::group_by(time_view) %>% 
+    dplyr::summarise(value = n()) %>% 
+    dplyr::ungroup()
+}
+Manpower_total_lv.COUNTRY <- function(bssdt, dbfile) {
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  mp = get_Manpower(bssdt, included_ter_ag = F, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% dplyr::mutate(time_view = strftime(BUSSINESSDATE, '%Y%m'))
+  mp %>% 
+    dplyr::group_by(time_view) %>% 
+    dplyr::summarise(value = n()) %>% 
+    dplyr::ungroup()
+}
+
+Manpower_GAHCM2_GATIENGIANG1_OTHERS <- function(bssdt, dbfile) {
+  seg = SEGMENT_AGENTS_IN_GAHCM2_GATIENGIANG1_OTHERS(bssdt, dbfile)
+  mp = get_Manpower(bssdt, included_ter_ag = F, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(time_view = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::select(time_view, AGENT_CODE)
+  
+  seg %>% merge(x = ., y = mp, by.x = 'AGENT_CODE', by.y = 'AGENT_CODE', all.y = T) %>% 
+    dplyr::group_by(time_view, territory, level, SEG) %>% 
+    dplyr::summarise(value = n())  %>% 
+    dplyr::filter(territory == 'SOUTH') %>% 
+    dplyr::ungroup() %>% 
+    dplyr::mutate(kpi = ifelse(SEG == 'OTHERS', '10234_10266_OTHERS', SEG)) %>% 
+    dplyr::mutate(kpi = paste('Manpower', kpi, sep = '_')) %>% 
+    dplyr::select(-SEG) 
+}
+
+indi_APE_mtd_include_SP_10percent <- function(bssdt, dbfile){
+  if(!inherits(bssdt, "Date")) {
+    message("date parameter should be a Date type")
+    stop()
+  }
+  
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile) 
+  ape = dplyr::filter(kpi, kpi$APE != 0) %>% dplyr::select(BUSSINESSDATE, AGCODE, APE)
+  ultp = dplyr::filter(kpi, kpi$SACSTYP=='EP') %>% 
+    dplyr::select(BUSSINESSDATE, AGCODE, ULTP) %>% 
+    dplyr::mutate(APE = ULTP*10/100) %>% # include 10% sp to ape
+    dplyr::select(-ULTP)
+  rbind(
+    ape
+    , 
+    ultp 
+  )
+}
+
+
+
 RYP <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
   if(!inherits(bssdt, "Date")) {
     message ("date parameter should be a Date type")
@@ -2358,13 +4224,24 @@ FYP <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.
     dplyr::mutate(SEG='SA') %>% 
     dplyr::select(AGENT_CODE, SEG)
   
-  genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
-    dplyr::mutate(SEG='GENLION') %>% 
-    dplyr::select(AGENT_CODE, SEG) %>% 
-    dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
-  if (nrow(genlion) == 0) {
-    warning(sprintf('Genlion of business date: %s - has no data', bssdt))
-    stop()
+  # genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+  #   dplyr::mutate(SEG='GENLION') %>% 
+  #   dplyr::select(AGENT_CODE, SEG) %>% 
+  #   dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
+  # if (nrow(genlion) == 0) {
+  #   warning(sprintf('Genlion of business date: %s - has no data', bssdt))
+  #   stop()
+  # }
+  
+  if (bssdt >= as.Date('2017-04-30')) {
+    genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+      dplyr::mutate(SEG = 'GENLION') %>% 
+      dplyr::select(AGENT_CODE, SEG) %>% 
+      dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
+  } else {
+    genlion <- get_Manpower_MDRT(bssdt, dbfile) %>% 
+      dplyr::select(AGENT_CODE) %>% 
+      dplyr::mutate(SEG = 'GENLION') # TRUOC 20170430 THI DAY LA MDRT NHUNG DE GENLION TUONG TRUNG
   }
   
   mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
@@ -2600,14 +4477,14 @@ Rider <- function(bssdt, dbfile = 'KPI_PRODUCTION/main_database.db'){
     case %>% 
       dplyr::filter(COUNTRIDERS>=1) %>% 
       merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
-      dplyr::group_by(kpi='rider_attach', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='ZONE', region=REGIONCD, zone=ZONECD, team='', fmt='#,##0') %>% 
+      dplyr::group_by(kpi='rider_attach', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='ZONE', region='', zone=ZONECD, team='', fmt='#,##0') %>% 
       dplyr::summarise(value=sum(CASE, na.rm = T)) %>% 
       dplyr::ungroup(.)
     ,
     case %>% 
       dplyr::filter(COUNTRIDERS>=1) %>% 
       merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
-      dplyr::group_by(kpi='rider_attach', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='TEAM', region=REGIONCD, zone=ZONECD, team=TEAMCD, fmt='#,##0') %>% 
+      dplyr::group_by(kpi='rider_attach', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='TEAM', region='', zone='', team=TEAMCD, fmt='#,##0') %>% 
       dplyr::summarise(value=sum(CASE, na.rm = T)) %>% 
       dplyr::ungroup(.)
   )
@@ -2624,87 +4501,252 @@ Rider <- function(bssdt, dbfile = 'KPI_PRODUCTION/main_database.db'){
       dplyr::filter(COUNTRIDERS>=4) %>% 
       merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
       dplyr::group_by(kpi='ratio_case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='TERRITORY',  region='', zone='', team='', fmt='0.0%') %>% 
-      dplyr::summarise(value=sum(CASE, na.rm = T)/sum(case$CASE, na.rm = T)) %>% 
-      dplyr::ungroup(.)
+      dplyr::summarise(value = sum(CASE, na.rm = T)) %>% 
+      dplyr::ungroup(.) %>% 
+      merge(
+        x = .
+        ,
+        y = case %>% 
+          merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
+          dplyr::group_by(kpi='ratio_case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='TERRITORY',  region='', zone='', team='', fmt='0.0%') %>% 
+          dplyr::summarise(value = sum(CASE, na.rm = T))
+        ,
+        by.x=c( 'kpi', 'time_view', 'territory',     'level', 'region',  'zone',  'team',   'fmt')
+        ,
+        by.y=c( 'kpi', 'time_view', 'territory',     'level', 'region',  'zone',  'team',   'fmt')
+      ) %>% 
+      dplyr::mutate(value = ifelse(value.y==0, 0, value.x/ value.y)) %>% 
+      dplyr::select(-value.x, -value.y)
     ,
     case %>% 
       dplyr::filter(COUNTRIDERS>=4) %>% 
       merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
       dplyr::group_by(kpi='ratio_case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='REGION',  region=REGIONCD, zone='', team='', fmt='0.0%') %>% 
-      dplyr::summarise(value=sum(CASE, na.rm = T)/sum(case$CASE, na.rm = T)) %>% 
-      dplyr::ungroup(.)
+      dplyr::summarise(value=sum(CASE, na.rm = T)) %>% 
+      dplyr::ungroup(.) %>% 
+      merge(
+        x = .
+        ,
+        y = case %>% 
+          merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
+          dplyr::group_by(kpi='ratio_case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='REGION',  region=REGIONCD, zone='', team='', fmt='0.0%') %>% 
+          dplyr::summarise(value=sum(CASE, na.rm = T))
+        ,
+        by.x=c( 'kpi', 'time_view', 'territory',     'level', 'region',  'zone',  'team',   'fmt')
+        ,
+        by.y=c( 'kpi', 'time_view', 'territory',     'level', 'region',  'zone',  'team',   'fmt')
+      ) %>% 
+      dplyr::mutate(value = ifelse(value.y==0, 0, value.x/ value.y)) %>% 
+      dplyr::select(-value.x, -value.y)
     ,
     case %>% 
       dplyr::filter(COUNTRIDERS>=4) %>% 
       merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
-      dplyr::group_by(kpi='ratio_case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='ZONE',  region=REGIONCD, zone=ZONECD, team='', fmt='0.0%') %>% 
-      dplyr::summarise(value=sum(CASE, na.rm = T)/sum(case$CASE, na.rm = T)) %>% 
-      dplyr::ungroup(.)
+      dplyr::group_by(kpi='ratio_case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='ZONE',  region='', zone=ZONECD, team='', fmt='0.0%') %>% 
+      dplyr::summarise(value=sum(CASE, na.rm = T)) %>% 
+      dplyr::ungroup(.) %>% 
+      merge(
+        x = .
+        ,
+        y = case %>% 
+          merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
+          dplyr::group_by(kpi='ratio_case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='ZONE',  region='', zone=ZONECD, team='', fmt='0.0%') %>% 
+          dplyr::summarise(value=sum(CASE, na.rm = T))
+        ,
+        by.x=c( 'kpi', 'time_view', 'territory',     'level', 'region',  'zone',  'team',   'fmt')
+        ,
+        by.y=c( 'kpi', 'time_view', 'territory',     'level', 'region',  'zone',  'team',   'fmt')
+      ) %>% 
+      dplyr::mutate(value = ifelse(value.y==0, 0, value.x/ value.y)) %>% 
+      dplyr::select(-value.x, -value.y)
     ,
     case %>% 
       dplyr::filter(COUNTRIDERS>=4) %>% 
       merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
-      dplyr::group_by(kpi='ratio_case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='TEAM',  region=REGIONCD, zone=ZONECD, team=TEAMCD, fmt='0.0%') %>% 
-      dplyr::summarise(value=sum(CASE, na.rm = T)/sum(case$CASE, na.rm = T)) %>% 
-      dplyr::ungroup(.)
+      dplyr::group_by(kpi='ratio_case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='TEAM',  region='', zone='', team=TEAMCD, fmt='0.0%') %>% 
+      dplyr::summarise(value=sum(CASE, na.rm = T)) %>% 
+      dplyr::ungroup(.) %>% 
+      merge(
+        x = .
+        ,
+        y = case %>% 
+          merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
+          dplyr::group_by(kpi='ratio_case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='TEAM',  region='', zone='', team=TEAMCD, fmt='0.0%') %>% 
+          dplyr::summarise(value=sum(CASE, na.rm = T))
+        ,
+        by.x=c( 'kpi', 'time_view', 'territory',     'level', 'region',  'zone',  'team',   'fmt')
+        ,
+        by.y=c( 'kpi', 'time_view', 'territory',     'level', 'region',  'zone',  'team',   'fmt')
+      ) %>% 
+      dplyr::mutate(value = ifelse(value.y==0, 0, value.x/ value.y)) %>% 
+      dplyr::select(-value.x, -value.y)
     
     )
   
-  rbind(
+  case4riders = rbind(
+    case %>% 
+      dplyr::filter(COUNTRIDERS>=4) %>% 
+      merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(kpi='case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory='', level='COUNTRY',  region='', zone='', team='', fmt='#,##0') %>% 
+      dplyr::summarise(value=sum(CASE, na.rm = T)) %>% 
+      dplyr::ungroup(.)
+    ,
+    case %>% 
+      dplyr::filter(COUNTRIDERS>=4) %>% 
+      merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(kpi='case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='TERRITORY',  region='', zone='', team='', fmt='#,##0') %>% 
+      dplyr::summarise(value=sum(CASE, na.rm = T)) %>% 
+      dplyr::ungroup(.)
+    ,
+    case %>% 
+      dplyr::filter(COUNTRIDERS>=4) %>% 
+      merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(kpi='case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='REGION',  region=REGIONCD, zone='', team='', fmt='#,##0') %>% 
+      dplyr::summarise(value=sum(CASE, na.rm = T)) %>% 
+      dplyr::ungroup(.)
+    ,
+    case %>% 
+      dplyr::filter(COUNTRIDERS>=4) %>% 
+      merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(kpi='case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='ZONE',  region='', zone=ZONECD, team='', fmt='#,##0') %>% 
+      dplyr::summarise(value=sum(CASE, na.rm = T)) %>% 
+      dplyr::ungroup(.)
+    ,
+    case %>% 
+      dplyr::filter(COUNTRIDERS>=4) %>% 
+      merge(x=mp, y=., by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(kpi='case4riders', time_view=strftime(BUSSINESSDATE,'%Y%m'), territory=TERRITORY, level='TEAM',  region='', zone='', team=TEAMCD, fmt='#,##0') %>% 
+      dplyr::summarise(value=sum(CASE, na.rm = T)) %>% 
+      dplyr::ungroup(.)
+    
+  )
+  
+  re = rbind(
     rider_attach
     ,
     ratio_case4riders
+    ,
+    case4riders
     )
+  re[is.na(re$value),] <- 0
+  re
 }
-Rider_sheet <- function(dbfile = 'KPI_PRODUCTION/main_database.db') {
+Rider_sheet <- function(bssdt, dbfile = 'KPI_PRODUCTION/main_database.db') {
+  str = get_team_structure(dbfile)
+  
   te = rbind(
     kpi_segmentation_1.1(criteria = "where kpi in ('rider_attach') and level='TEAM' ") %>% mutate(idx=1)
     ,
     kpi_segmentation_1.1(criteria = "where kpi in ('ratio_case4riders') and level='TEAM' ")  %>% mutate(idx=2)
+    # ,
+    # kpi_segmentation_1.1(criteria = "where kpi in ('case4riders') and level='TEAM' ")  %>% mutate(idx=3)
+  ) 
+  te_rider_attach_ytd = te %>% 
+    dplyr::filter(., as.numeric(substr(time_view, 5,6)) <= month(bssdt)) %>% # filter data for ytd calculation
+    dplyr::filter(., kpi == 'rider_attach') %>% 
+    dplyr::group_by(time_view=substr(time_view, 1, 4), kpi, territory, region, zone, team, level, idx, fmt) %>% 
+    dplyr::summarise(value=sum(value)) %>% 
+    dplyr::ungroup(.)
+  te_case4riders_ytd = te %>% 
+    dplyr::filter(., as.numeric(substr(time_view, 5,6)) <= month(bssdt)) %>% # filter data for ytd calculation
+    dplyr::filter(., kpi == 'case4riders') %>% 
+    dplyr::group_by(time_view=substr(time_view, 1, 4), kpi, territory, region, zone, team, level, idx, fmt) %>% 
+    dplyr::summarise(value=sum(value)) %>% 
+    dplyr::ungroup(.)
+  te_ratio_case4riders_ytd = merge(
+    x = te_case4riders_ytd
+    ,
+    y = te_rider_attach_ytd
+    ,
+    by.x = c('time_view', 'territory', 'region', 'zone', 'team', 'level')
+    ,
+    by.y = c('time_view', 'territory', 'region', 'zone', 'team', 'level')
   ) %>% 
-    dplyr::mutate(name=team, color=color_team) %>% 
-    tidyr::spread(time_view, value) %>% 
-    dplyr::arrange(territory, idx) 
+    dplyr::mutate(kpi='ratio_case4riders', fmt="0.0%", idx=2, value=value.x/value.y) %>% 
+    dplyr::select(., -grep("*\\.x$|*\\.y$", colnames(.))) # remove columns that have sufix is ".x" or '.y' (if any)
+  
+  te = rbind(
+    te, te_rider_attach_ytd, te_case4riders_ytd, te_ratio_case4riders_ytd
+  ) %>% 
+    merge(
+      x = .
+      ,
+      y = unique(select(str, c('region', 'zone', 'team'))),
+      ,
+      by.x = c('team')
+      ,
+      by.y = c('team')
+      ,
+      all.x = TRUE
+    ) %>% 
+    dplyr::mutate(region = region.y, zone = zone.y) %>% 
+    dplyr::select(., -grep("*\\.x$|*\\.y$", colnames(.))) %>% # remove columns that have sufix is ".x" or '.y' (if any)
+    dplyr::mutate(name=team, color=color_team) 
+    # tidyr::spread(time_view, value) %>% 
+    # dplyr::arrange(territory, idx) 
   
   zo = rbind(
     kpi_segmentation_1.1(criteria = "where kpi in ('rider_attach') and level='ZONE' ") %>% mutate(idx=1)
     ,
     kpi_segmentation_1.1(criteria = "where kpi in ('ratio_case4riders') and level='ZONE' ")  %>% mutate(idx=2)
   ) %>% 
-    dplyr::mutate(name=zone, color=color_zone) %>% 
-    tidyr::spread(time_view, value) %>% 
-    dplyr::arrange(territory, idx)
+    merge(
+      x = .
+      ,
+      y = unique(select(str, c('region', 'zone'))),
+      ,
+      by.x = c('zone')
+      ,
+      by.y = c('zone')
+      ,
+      all.x = TRUE
+    ) %>% 
+    dplyr::mutate(region = region.y) %>% 
+    dplyr::select(., -grep("*\\.x$|*\\.y$", colnames(.))) %>% # remove columns that have sufix is ".x" or '.y' (if any)
+    dplyr::mutate(name=zone, color=color_zone) 
+    # tidyr::spread(time_view, value) %>% 
+    # dplyr::arrange(territory, idx)
   
   re = rbind(
     kpi_segmentation_1.1(criteria = "where kpi in ('rider_attach') and level='REGION' ") %>% mutate(idx=1)
     ,
     kpi_segmentation_1.1(criteria = "where kpi in ('ratio_case4riders') and level='REGION' ")  %>% mutate(idx=2)
   ) %>% 
-    dplyr::mutate(name=region, color=color_region) %>% 
-    tidyr::spread(time_view, value) %>% 
-    dplyr::arrange(territory, idx)
+    dplyr::mutate(name=region, color=color_region)  
+    # tidyr::spread(time_view, value) %>% 
+    # dplyr::arrange(territory, idx)
   
   ter = rbind(
     kpi_segmentation_1.1(criteria = "where kpi in ('rider_attach') and level='TERRITORY' ") %>% mutate(idx=1)
     ,
     kpi_segmentation_1.1(criteria = "where kpi in ('ratio_case4riders') and level='TERRITORY' ")  %>% mutate(idx=2)
   ) %>% 
-    dplyr::mutate(name=territory, color=color_territory) %>% 
-    tidyr::spread(time_view, value) %>% 
-    dplyr::arrange(territory, idx)
+    dplyr::mutate(name=territory, color=color_territory) 
+    # tidyr::spread(time_view, value) %>% 
+    # dplyr::arrange(territory, idx)
   
   con = rbind(
     kpi_segmentation_1.1(criteria = "where kpi in ('rider_attach') and level='COUNTRY' ") %>% mutate(idx=1)
     ,
     kpi_segmentation_1.1(criteria = "where kpi in ('ratio_case4riders') and level='COUNTRY' ")  %>% mutate(idx=2)
   ) %>% 
-    dplyr::mutate(name='', color=color_country) %>% 
-    tidyr::spread(time_view, value) %>% 
-    dplyr::arrange(territory, idx)
+    dplyr::mutate(name='', color=color_country) 
+    # tidyr::spread(time_view, value) %>% 
+    # dplyr::arrange(territory, idx)
   
   rbind(
-    te, zo, re, ter, con
-  )
+    te %>% 
+      dplyr::arrange(level, territory, region, zone, name, idx), 
+    zo %>% 
+      dplyr::arrange(level, territory, region, zone, name, idx), 
+    re %>% 
+      dplyr::arrange(level, territory, region, zone, name, idx), 
+    ter %>% 
+      dplyr::arrange(level, territory, region, zone, name, idx), 
+    con %>% 
+      dplyr::arrange(level, territory, region, zone, name, idx)
+  ) %>% 
+    tidyr::spread(time_view, value)  
   
 }
 CaseSize <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
@@ -2884,6 +4926,352 @@ CaseSize <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_data
     dplyr::select(-BUSSINESSDATE, -TERRITORY, -SEG, -CASE, -APE, -IDX, -CASE_SIZE)
     
 }
+CaseSize1.1 <- function(bssdt, genlion_final_dt, dbfile){
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  if(!inherits(genlion_final_dt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  mp = SEGMENT_AGENTS_IN_SA_GENLION_MDRT_ROOKIE_2.3_4.6_7.12_13UPMONTHS_lv.TERRITORY(bssdt, genlion_final_dt, dbfile)
+  
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile)
+  baseproduct = get_base_productcd(dbfile)
+  
+  # chỉ lấy case của base product
+  case = dplyr::filter(kpi, kpi$CASE != 0) %>% 
+         merge(x=., y=baseproduct, by.x='PRODUCTCODE', by.y='PRODUCTCODE') %>% 
+         dplyr::select(time_view, AGCODE, CASE)
+  ape = dplyr::filter(kpi, kpi$APE != 0) %>% 
+    dplyr::select(time_view, AGCODE, APE)
+  
+  mp_case = rbind(
+    
+    mp %>% 
+    merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+    dplyr::group_by(time_view, territory, SEG, level='TERRITORY') %>% 
+    dplyr::summarise(CASE=sum(CASE)) %>% 
+    dplyr::ungroup(.)
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(time_view, territory, level='TERRITORY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(time_view, territory, level='TERRITORY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+    ,
+    #--
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(time_view, territory='COUNTRY', SEG, level='COUNTRY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.)
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(time_view, territory='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(time_view, territory='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+  )
+  
+  mp_ape = rbind(
+    mp %>% 
+    merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+    dplyr::group_by(time_view, territory, SEG, level='TERRITORY') %>% 
+    dplyr::summarise(APE=sum(APE)/10^6) %>% 
+    dplyr::ungroup(.)
+    ,
+    mp %>% 
+      merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(time_view, territory, level='TERRITORY') %>% 
+      dplyr::summarise(APE=sum(APE)/10^6) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% 
+      merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(time_view, territory, level='TERRITORY') %>% 
+      dplyr::summarise(APE=sum(APE)/10^6) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+    ,
+    #---
+    mp %>% 
+      merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(time_view, territory='COUNTRY', SEG, level='COUNTRY') %>% 
+      dplyr::summarise(APE=sum(APE)/10^6) %>% 
+      dplyr::ungroup(.)
+    ,
+    mp %>% 
+      merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(time_view, territory='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(APE=sum(APE)/10^6) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% 
+      merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(time_view, territory='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(APE=sum(APE)/10^6) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+  )
+  
+  mp_casesize = mp_ape %>% 
+    merge(x=., y=mp_case, 
+                   by.x=c('time_view','territory', 'SEG', 'level'),
+                   by.y=c('time_view','territory', 'SEG', 'level')) %>% 
+    dplyr::mutate(CASE_SIZE = APE/CASE)
+    
+  
+  # create index
+  mp_casesize['IDX']=0
+  mp_casesize[mp_casesize$SEG=='GENLION',]$IDX = 1
+  mp_casesize[mp_casesize$SEG=='Rookie in month',]$IDX = 2
+  mp_casesize[mp_casesize$SEG=='Rookie last month',]$IDX = 3
+  mp_casesize[mp_casesize$SEG=='2-3 months',]$IDX = 4
+  mp_casesize[mp_casesize$SEG=='4-6 months',]$IDX = 5
+  mp_casesize[mp_casesize$SEG=='7-12 months',]$IDX = 6
+  mp_casesize[mp_casesize$SEG=='13+ months',]$IDX = 7
+  mp_casesize[mp_casesize$SEG=='SA',]$IDX = 8
+  mp_casesize[mp_casesize$SEG=='TOTAL_EXCL_SA',]$IDX = 9
+  mp_casesize[mp_casesize$SEG=='TOTAL',]$IDX = 10
+  
+  # CREATE KPI
+  mp_casesize['kpi']=''
+  mp_casesize[mp_casesize$SEG=='GENLION',]$kpi = 'CaseSize_by_rookie_mdrt:MDRT'
+  mp_casesize[mp_casesize$SEG=='Rookie in month',]$kpi = 'CaseSize_by_rookie_mdrt:Rookie in month'
+  mp_casesize[mp_casesize$SEG=='Rookie last month',]$kpi = 'CaseSize_by_rookie_mdrt:Rookie last month'
+  mp_casesize[mp_casesize$SEG=='2-3 months',]$kpi = 'CaseSize_by_rookie_mdrt:2-3 months'
+  mp_casesize[mp_casesize$SEG=='4-6 months',]$kpi = 'CaseSize_by_rookie_mdrt:4 - 6 mths'
+  mp_casesize[mp_casesize$SEG=='7-12 months',]$kpi = 'CaseSize_by_rookie_mdrt:7-12mth'
+  mp_casesize[mp_casesize$SEG=='13+ months',]$kpi = 'CaseSize_by_rookie_mdrt:13+mth'
+  mp_casesize[mp_casesize$SEG=='SA',]$kpi = 'CaseSize_by_rookie_mdrt:SA'
+  mp_casesize[mp_casesize$SEG=='TOTAL',]$kpi = 'CaseSize_by_rookie_mdrt:Total'
+  mp_casesize[mp_casesize$SEG=='TOTAL_EXCL_SA',]$kpi = 'CaseSize_by_rookie_mdrt:Total_exclude_SA'
+  
+  mp_casesize %>% dplyr::arrange(territory, IDX) %>% 
+    dplyr::mutate(value=CASE_SIZE) %>% 
+    dplyr::select(-SEG, -CASE, -APE, -IDX, -CASE_SIZE)
+    
+}
+CaseSize_exclude_2GA <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- "
+    select OFFICECD from RAWDATA_GATotal where OFFICE_NAME in ('003 GA HCM 2', '010 GA TIỀN GIANG 1')
+    "
+  result <- dbSendQuery(my_database$con, SQL)
+  excluded_GA = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  if(!inherits(genlion_final_dt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  # phân loại agent theo nhóm sa, genlion, rookie... theo thứ tự ưu tiên từ cao đến thấp.
+  sa = get_Manpower_sa(bssdt, dbfile) %>% 
+    dplyr::mutate(SEG='SA') %>% 
+    dplyr::select(AGENT_CODE, SEG)
+  
+  # genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+  #   dplyr::mutate(SEG='GENLION') %>% 
+  #   dplyr::select(AGENT_CODE, SEG) %>% 
+  #   dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
+  if (bssdt >= as.Date('2017-04-30')) {
+    genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+      dplyr::mutate(SEG = 'GENLION') %>% 
+      dplyr::select(AGENT_CODE, SEG) %>% 
+      dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
+  } else {
+    genlion <- get_Manpower_MDRT(bssdt, dbfile) %>% 
+      dplyr::select(AGENT_CODE) %>% 
+      dplyr::mutate(SEG = 'GENLION') # TRUOC 20170430 THI DAY LA MDRT NHUNG DE GENLION TUONG TRUNG
+  }
+  
+  if (nrow(genlion) == 0) {
+    warning(sprintf('Genlion of business date: %s - has no data', bssdt))
+    stop()
+  }
+  
+  mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    merge(x=., y=rbind(genlion,sa), by.x='AGENT_CODE', by.y='AGENT_CODE', all.x=T)
+  
+  try((mp[is.na(mp$SEG) & mp$MDIFF==0,]$SEG='Rookie in month'), silent= T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF==1,]$SEG='Rookie last month'), silent= T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF %in% c(2:3),]$SEG='2-3 months'), silent= T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF %in% c(4:6),]$SEG='4-6 months'), silent= T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF %in% c(7:12),]$SEG='7-12 months'), silent= T)
+  try((mp[is.na(mp$SEG) & mp$MDIFF >= 13,]$SEG='13+ months'), silent= T)
+  
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile) %>% dplyr::filter(!OFFICECD %in% excluded_GA$OFFICECD)
+  baseproduct = get_base_productcd(dbfile)
+  
+  # chỉ lấy case của base product
+  case = dplyr::filter(kpi, kpi$CASE != 0) %>% 
+         merge(x=., y=baseproduct, by.x='PRODUCTCODE', by.y='PRODUCTCODE') %>% 
+         dplyr::select(AGCODE, CASE)
+  ape = dplyr::filter(kpi, kpi$APE != 0) %>% 
+    dplyr::select(AGCODE, APE)
+  
+  mp_case = rbind(
+    
+    mp %>% 
+    merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+    dplyr::group_by(BUSSINESSDATE, TERRITORY, SEG, level='TERRITORY') %>% 
+    dplyr::summarise(CASE=sum(CASE)) %>% 
+    dplyr::ungroup(.)
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY, level='TERRITORY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY, level='TERRITORY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+    ,
+    #--
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', SEG, level='COUNTRY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.)
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+  )
+  
+  mp_ape = rbind(
+    mp %>% 
+    merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+    dplyr::group_by(BUSSINESSDATE, TERRITORY, SEG, level='TERRITORY') %>% 
+    dplyr::summarise(APE=sum(APE)/10^6) %>% 
+    dplyr::ungroup(.)
+    ,
+    mp %>% 
+      merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY, level='TERRITORY') %>% 
+      dplyr::summarise(APE=sum(APE)/10^6) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% 
+      merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY, level='TERRITORY') %>% 
+      dplyr::summarise(APE=sum(APE)/10^6) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+    ,
+    #---
+    mp %>% 
+      merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', SEG, level='COUNTRY') %>% 
+      dplyr::summarise(APE=sum(APE)/10^6) %>% 
+      dplyr::ungroup(.)
+    ,
+    mp %>% 
+      merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(APE=sum(APE)/10^6) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% 
+      merge(x=., y=ape, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(APE=sum(APE)/10^6) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+  )
+  
+  mp_casesize = mp_ape %>% 
+    merge(x=., y=mp_case, 
+                   by.x=c('BUSSINESSDATE','TERRITORY', 'SEG', 'level'),
+                   by.y=c('BUSSINESSDATE','TERRITORY', 'SEG', 'level')) %>% 
+    dplyr::mutate(CASE_SIZE = APE/CASE)
+    
+  
+  # create index
+  mp_casesize['IDX']=0
+  try((mp_casesize[mp_casesize$SEG=='GENLION',]$IDX = 1), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='Rookie in month',]$IDX = 2), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='Rookie last month',]$IDX = 3), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='2-3 months',]$IDX = 4), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='4-6 months',]$IDX = 5), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='7-12 months',]$IDX = 6), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='13+ months',]$IDX = 7), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='SA',]$IDX = 8), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='TOTAL_EXCL_SA',]$IDX = 9), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='TOTAL',]$IDX = 10), silent= T)
+  
+  # CREATE KPI
+  try((mp_casesize['kpi']=''), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='GENLION',]$kpi = 'CaseSize_by_rookie_mdrt:MDRT_excluded_2GA'), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='Rookie in month',]$kpi = 'CaseSize_by_rookie_mdrt:Rookie in month_excluded_2GA'), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='Rookie last month',]$kpi = 'CaseSize_by_rookie_mdrt:Rookie last month_excluded_2GA'), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='2-3 months',]$kpi = 'CaseSize_by_rookie_mdrt:2-3 months_excluded_2GA'), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='4-6 months',]$kpi = 'CaseSize_by_rookie_mdrt:4 - 6 mths_excluded_2GA'), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='7-12 months',]$kpi = 'CaseSize_by_rookie_mdrt:7-12mth_excluded_2GA'), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='13+ months',]$kpi = 'CaseSize_by_rookie_mdrt:13+mth_excluded_2GA'), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='SA',]$kpi = 'CaseSize_by_rookie_mdrt:SA_excluded_2GA'), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='TOTAL',]$kpi = 'CaseSize_by_rookie_mdrt:Total_excluded_2GA'), silent= T)
+  try((mp_casesize[mp_casesize$SEG=='TOTAL_EXCL_SA',]$kpi = 'CaseSize_by_rookie_mdrt:Total_exclude_SA_excluded_2GA'), silent= T)
+  
+  mp_casesize %>% dplyr::arrange(TERRITORY, IDX) %>% 
+    dplyr::mutate(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory=TERRITORY, value=CASE_SIZE) %>% 
+    dplyr::select(-BUSSINESSDATE, -TERRITORY, -SEG, -CASE, -APE, -IDX, -CASE_SIZE)
+    
+}
 Case_per_Active <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
   if(!inherits(bssdt, "Date")) {
     message ("date parameter should be a Date type")
@@ -3050,25 +5438,568 @@ Case_per_Active <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/ma
     dplyr::mutate(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory=TERRITORY, value=CASE_PER_ACTIVE) %>% 
     dplyr::select(-BUSSINESSDATE, -TERRITORY, -SEG, -CASE, -ACTIVE, -IDX, -CASE_PER_ACTIVE) 
 }
+Case_per_Active_exclude_2GA <- function(bssdt, genlion_final_dt, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf("
+       SELECT AGENTCD, OFFICECD FROM GVL_AGENTLIST WHERE BUSSINESSDATE='%s' AND OFFICECD in (
+   select OFFICECD from RAWDATA_GATotal where OFFICE_NAME in ('003 GA HCM 2', '010 GA TIỀN GIANG 1')
+  )
+    ",bssdt)
+  result <- dbSendQuery(my_database$con, SQL)
+  excluded_GA = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  if(!inherits(genlion_final_dt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  # phân loại agent theo nhóm sa, genlion, rookie... theo thứ tự ưu tiên từ cao đến thấp.
+  sa = get_Manpower_sa(bssdt, dbfile) %>% 
+    dplyr::mutate(SEG='SA') %>% 
+    dplyr::select(AGENT_CODE, SEG)
+  
+  if (bssdt >= as.Date('2017-04-30')) {
+    genlion = Genlion(strftime(bssdt, '%Y%m%d'), genlion_final_dt, dbfile) %>% 
+      dplyr::mutate(SEG = 'GENLION') %>% 
+      dplyr::select(AGENT_CODE, SEG) %>% 
+      dplyr::filter(., !AGENT_CODE %in% sa$AGENT_CODE)
+  } else {
+    genlion <- get_Manpower_MDRT(bssdt, dbfile) %>% 
+      dplyr::select(AGENT_CODE) %>% 
+      dplyr::mutate(SEG = 'GENLION') # TRUOC 20170430 THI DAY LA MDRT NHUNG DE GENLION TUONG TRUNG
+  }
+  if (nrow(genlion) == 0) {
+    warning(sprintf('Genlion of business date: %s - has no data', bssdt))
+    stop()
+  }
+  
+  mp = get_Manpower(bssdt, included_ter_ag = T, dbfile) %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(JOINING_DATE=as.Date(strptime(JOINING_DATE, '%Y-%m-%d'))) %>% 
+    dplyr::mutate(MDIFF = as.integer(round((
+      as.yearmon(BUSSINESSDATE) - as.yearmon(JOINING_DATE)
+    ) * 12))) %>% 
+    merge(x=., y=rbind(genlion,sa), by.x='AGENT_CODE', by.y='AGENT_CODE', all.x=T) %>% 
+    dplyr::filter(!AGENT_CODE %in% excluded_GA$AGENTCD)
+  
+  mp[is.na(mp$SEG) & mp$MDIFF==0,]$SEG='Rookie in month'
+  mp[is.na(mp$SEG) & mp$MDIFF==1,]$SEG='Rookie last month'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(2:3),]$SEG='2-3 months'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(4:6),]$SEG='4-6 months'
+  mp[is.na(mp$SEG) & mp$MDIFF %in% c(7:12),]$SEG='7-12 months'
+  mp[is.na(mp$SEG) & mp$MDIFF >= 13,]$SEG='13+ months'
+  
+  kpi = get_kpi(strftime(bssdt, '%Y%m%'), dbfile) %>% dplyr::filter(!OFFICECD %in% excluded_GA$OFFICECD)
+  baseproduct = get_base_productcd(dbfile)
+  
+  case = dplyr::filter(kpi, kpi$CASE != 0) %>% 
+         merge(x=., y=baseproduct, by.x='PRODUCTCODE', by.y='PRODUCTCODE') %>% 
+         dplyr::select(AGCODE, CASE)
+  
+  mp_case = rbind(
+    mp %>% 
+    merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+    dplyr::group_by(BUSSINESSDATE, TERRITORY, SEG, level='TERRITORY') %>% 
+    dplyr::summarise(CASE=sum(CASE)) %>% 
+    dplyr::ungroup(.)
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY, level='TERRITORY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY, level='TERRITORY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+    ,
+    # country
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', SEG, level='COUNTRY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.)
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% 
+      merge(x=., y=case, by.x='AGENT_CODE', by.y='AGCODE') %>% 
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(CASE=sum(CASE)) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+  )
+  
+  active = rbind(
+    mp %>% dplyr::filter(ACTIVESP=='Yes') %>%  
+      dplyr::group_by(BUSSINESSDATE, TERRITORY, SEG, level='TERRITORY') %>% 
+      dplyr::summarise(ACTIVE=n()) %>% 
+      dplyr::ungroup(.)
+    ,
+    mp %>% dplyr::filter(ACTIVESP=='Yes') %>%  
+      dplyr::group_by(BUSSINESSDATE, TERRITORY, level='TERRITORY') %>% 
+      dplyr::summarise(ACTIVE=n()) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% dplyr::filter(ACTIVESP=='Yes') %>%  
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY, level='TERRITORY') %>% 
+      dplyr::summarise(ACTIVE=n()) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+    ,
+    # country
+    mp %>% dplyr::filter(ACTIVESP=='Yes') %>%  
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', SEG, level='COUNTRY') %>% 
+      dplyr::summarise(ACTIVE=n()) %>% 
+      dplyr::ungroup(.)
+    ,
+    mp %>% dplyr::filter(ACTIVESP=='Yes') %>%  
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(ACTIVE=n()) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL')
+    ,
+    mp %>% dplyr::filter(ACTIVESP=='Yes') %>%  
+      dplyr::filter(SEG!='SA') %>% 
+      dplyr::group_by(BUSSINESSDATE, TERRITORY='COUNTRY', level='COUNTRY') %>% 
+      dplyr::summarise(ACTIVE=n()) %>% 
+      dplyr::ungroup(.) %>% 
+      dplyr::mutate(SEG='TOTAL_EXCL_SA')
+  )
+  
+  mp_case_per_active = mp_case %>% 
+    merge(x=., y=active, 
+                   by.x=c('BUSSINESSDATE','TERRITORY', 'SEG', 'level'),
+                   by.y=c('BUSSINESSDATE','TERRITORY', 'SEG', 'level')) %>% 
+    dplyr::mutate(CASE_PER_ACTIVE = CASE/ACTIVE)
+    
+  
+  # create index
+  try((mp_case_per_active['IDX']=0), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='GENLION',]$IDX = 1), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='Rookie in month',]$IDX = 2), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='Rookie last month',]$IDX = 3), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='2-3 months',]$IDX = 4), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='4-6 months',]$IDX = 5), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='7-12 months',]$IDX = 6), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='13+ months',]$IDX = 7), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='SA',]$IDX = 8), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='TOTAL_EXCL_SA',]$IDX = 9), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='TOTAL',]$IDX = 10), silent= T)
+  
+  # CREATE KPI
+  try((mp_case_per_active['kpi']=''), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='GENLION',]$kpi = '# Case/Active_by_rookie_mdrt:MDRT_excluded_2GA'), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='Rookie in month',]$kpi = '# Case/Active_by_rookie_mdrt:Rookie in month_excluded_2GA'), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='Rookie last month',]$kpi = '# Case/Active_by_rookie_mdrt:Rookie last month_excluded_2GA'), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='2-3 months',]$kpi = '# Case/Active_by_rookie_mdrt:2-3 months_excluded_2GA'), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='4-6 months',]$kpi = '# Case/Active_by_rookie_mdrt:4 - 6 mths_excluded_2GA'), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='7-12 months',]$kpi = '# Case/Active_by_rookie_mdrt:7-12mth_excluded_2GA'), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='13+ months',]$kpi = '# Case/Active_by_rookie_mdrt:13+mth_excluded_2GA'), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='SA',]$kpi = '# Case/Active_by_rookie_mdrt:SA_excluded_2GA'), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='TOTAL',]$kpi = '# Case/Active_by_rookie_mdrt:Total_excluded_2GA'), silent= T)
+  try((mp_case_per_active[mp_case_per_active$SEG=='TOTAL_EXCL_SA',]$kpi = '# Case/Active_by_rookie_mdrt:Total_exclude_SA_excluded_2GA'), silent= T)
+  
+  mp_case_per_active %>% dplyr::arrange(TERRITORY, IDX) %>% 
+    dplyr::mutate(time_view=strftime(BUSSINESSDATE, '%Y%m'), territory=TERRITORY, value=CASE_PER_ACTIVE) %>% 
+    dplyr::select(-BUSSINESSDATE, -TERRITORY, -SEG, -CASE, -ACTIVE, -IDX, -CASE_PER_ACTIVE) 
+}
 
 AD_LIST = function(dbfile = 'KPI_PRODUCTION/main_database.db') {
   my_database <- src_sqlite(dbfile, create = TRUE)
   SQL <- 
     "
-  SELECT DISTINCT TEAM_CODE AS ADCODE, TEAM_NAME AS ADNAME, TEAM_HEAD_NAME AS ADHEADCODE, TEAM_HEAD_NAME AS ADHEADNAME FROM RAWDATA_ADLIST
-UNION ALL
-SELECT DISTINCT OFFICE_CODE AS ADCODE, OFFICE_NAME AS ADNAME, OFFICE_HEAD_CODE AS ADHEADCODE, OFFICE_HEAD_NAME AS ADHEADNAME FROM RAWDATA_ADLIST
-UNION ALL
-SELECT DISTINCT ZONE_CODE AS ADCODE, ZONE_NAME AS ADNAME, ZONE_HEAD_CODE AS ADHEADCODE, ZONE_HEAD_NAME AS ADHEADNAME FROM RAWDATA_ADLIST
-UNION ALL
-SELECT DISTINCT REGION_CODE AS ADCODE, REGION_NAME AS ADNAME, REGION_HEAD_CODE AS ADHEADCODE, REGION_HEAD_NAME AS ADHEADNAME FROM RAWDATA_ADLIST
+  SELECT DISTINCT 'TEAM' AS LEVEL, TEAM_CODE AS ADCODE, TEAM_NAME AS ADNAME, TEAM_HEAD_CODE AS ADHEADCODE, TEAM_HEAD_NAME AS ADHEADNAME FROM RAWDATA_ADLIST
+  WHERE ACTIVE='YES' AND TEAM_HEAD_CODE IS NOT NULL
+  UNION ALL
+  SELECT DISTINCT 'OFFICE' AS LEVEL, OFFICE_CODE AS ADCODE, OFFICE_NAME AS ADNAME, OFFICE_HEAD_CODE AS ADHEADCODE, OFFICE_HEAD_NAME AS ADHEADNAME FROM RAWDATA_ADLIST
+  WHERE ACTIVE='YES' AND TEAM_HEAD_CODE IS NOT NULL
+  UNION ALL
+  SELECT DISTINCT 'ZONE' AS LEVEL, ZONE_CODE AS ADCODE, ZONE_NAME AS ADNAME, ZONE_HEAD_CODE AS ADHEADCODE, ZONE_HEAD_NAME AS ADHEADNAME FROM RAWDATA_ADLIST
+  WHERE ACTIVE='YES' AND TEAM_HEAD_CODE IS NOT NULL
+  UNION ALL
+  SELECT DISTINCT 'REGION' AS LEVEL, REGION_CODE AS ADCODE, REGION_NAME AS ADNAME, REGION_HEAD_CODE AS ADHEADCODE, REGION_HEAD_NAME AS ADHEADNAME FROM RAWDATA_ADLIST
+  WHERE ACTIVE='YES' AND TEAM_HEAD_CODE IS NOT NULL
 
   "
   result <- dbSendQuery(my_database$con, SQL)
   data = fetch(result, encoding="utf-8")
   dbClearResult(result)
+  data %>% dplyr::filter(!is.na(ADCODE))
+}
+ad_list_full_structure = function(dbfile = 'KPI_PRODUCTION/main_database.db') {
+  territory = territory_mapping(dbfile)
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- 
+    "
+  SELECT DISTINCT 'TEAM' AS LEVEL, TEAM_CODE AS ADCODE, TEAM_NAME AS ADNAME, TEAM_HEAD_CODE AS ADHEADCODE, TEAM_HEAD_NAME AS ADHEADNAME,
+  TEAM_HEAD_CODE, OFFICE_HEAD_CODE, ZONE_HEAD_CODE, REGION_HEAD_CODE, REGION_CODE
+  FROM RAWDATA_ADLIST
+  WHERE ACTIVE='YES' AND TEAM_HEAD_CODE IS NOT NULL AND CHANNEL_CODE = 'TIEDAGENCY'
+  UNION ALL
+  SELECT DISTINCT 'OFFICE' AS LEVEL, OFFICE_CODE AS ADCODE, OFFICE_NAME AS ADNAME, OFFICE_HEAD_CODE AS ADHEADCODE, OFFICE_HEAD_NAME AS ADHEADNAME,
+  '' AS TEAM_HEAD_CODE, OFFICE_HEAD_CODE, ZONE_HEAD_CODE, REGION_HEAD_CODE, REGION_CODE
+  FROM RAWDATA_ADLIST
+  WHERE ACTIVE='YES' AND TEAM_HEAD_CODE IS NOT NULL AND OFFICE_CODE IS NOT NULL AND CHANNEL_CODE = 'TIEDAGENCY'
+  UNION ALL
+  SELECT DISTINCT 'ZONE' AS LEVEL, ZONE_CODE AS ADCODE, ZONE_NAME AS ADNAME, ZONE_HEAD_CODE AS ADHEADCODE, ZONE_HEAD_NAME AS ADHEADNAME,
+  '' AS TEAM_HEAD_CODE, '' AS OFFICE_HEAD_CODE, ZONE_HEAD_CODE, REGION_HEAD_CODE, REGION_CODE
+  FROM RAWDATA_ADLIST
+  WHERE ACTIVE='YES' AND TEAM_HEAD_CODE IS NOT NULL AND ZONE_CODE IS NOT NULL AND CHANNEL_CODE = 'TIEDAGENCY'
+  UNION ALL
+  SELECT DISTINCT 'REGION' AS LEVEL, REGION_CODE AS ADCODE, REGION_NAME AS ADNAME, REGION_HEAD_CODE AS ADHEADCODE, REGION_HEAD_NAME AS ADHEADNAME,
+  '' AS TEAM_HEAD_CODE, '' AS OFFICE_HEAD_CODE, '' AS ZONE_HEAD_CODE, REGION_HEAD_CODE, REGION_CODE
+  FROM RAWDATA_ADLIST
+  WHERE ACTIVE='YES' AND TEAM_HEAD_CODE IS NOT NULL AND REGION_CODE IS NOT NULL AND CHANNEL_CODE = 'TIEDAGENCY'
+  "
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  data %>% 
+    dplyr::filter(!is.na(ADCODE)) %>% 
+    merge(
+      x = .,
+      y = territory %>% dplyr::select(REGION_CODE, TERRITORY),
+      by.x = 'REGION_CODE',
+      by.y = 'REGION_CODE',
+      all.x = T
+    )
+}
+territory_mapping = function(dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- "SELECT * FROM RAWDATA_MAPPING_TERRITORY_REGION"
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
   data
 }
+sales_by_product = function(bssdt, dbfile = 'KPI_PRODUCTION/main_database.db') {
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  mp = get_Manpower(bssdt, included_ter_ag = F, dbfile)
+  prds = all_product()
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf(
+  "
+  SELECT
+  C.AGNTNUM AS AGENT_CODE,
+  C.REPNUM AS REPNUM,
+  C.CHDRNUM AS CHDRNUM,
+  C.STATCODE AS STATCODE,
+  C.BILLFREQ AS BILLFREQ,
+  C.CNTTYPE AS CNTTYPE,
+  H.HPRRCVDT AS HPRRCVDT,
+  CVR.CRTABLE AS COVRPF_PRODUCTCODE,
+  CVT.CRTABLE AS COVTPF_PRODUCTCODE,
+  CVR.INSTPREM AS COVRPF_INSTPREM,
+  CVT.APE AS COVTPF_INSTPREM
+  FROM (
+      SELECT * FROM CHDRPF WHERE VALIDFLAG <> '2'
+  )C
+  INNER JOIN HPADPF H ON C.CHDRNUM = H.CHDRNUM
+  LEFT JOIN (
+      SELECT
+      CHDRNUM,
+      CRTABLE,
+      Sum(SINGP) AS SP,
+      Sum(INSTPREM) AS Prem,
+      Sum([INSTPREM]*[BILLFREQ]) AS APE,
+      BILLFREQ
+      FROM COVTPF
+      GROUP BY CHDRNUM, CRTABLE, BILLFREQ
+
+  ) CVT ON C.CHDRNUM = CVT.CHDRNUM
+  LEFT JOIN (
+      SELECT CHDRNUM, CRTABLE, STATCODE, INSTPREM
+      FROM COVRPF
+        WHERE VALIDFLAG='1'
+  )CVR ON C.CHDRNUM = CVR.CHDRNUM
+  WHERE H.HPRRCVDT LIKE '%s'
+  "
+  ,
+  strftime(bssdt, '%Y%m%'))
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding = "utf-8")
+  dbClearResult(result)
+  data = data %>% 
+    dplyr::mutate(HPRRCVDT = as.Date(strptime(HPRRCVDT, '%Y%m%d'))) %>% 
+    dplyr::mutate(PRODUCTCODE = ifelse(!is.na(COVRPF_PRODUCTCODE), COVRPF_PRODUCTCODE, COVTPF_PRODUCTCODE)) %>% 
+    dplyr::mutate(ISSUED_APE = as.numeric(BILLFREQ)*COVRPF_INSTPREM) %>% 
+    dplyr::mutate(PENDING_APE = ifelse(!is.na(COVTPF_INSTPREM), as.numeric(BILLFREQ)*COVTPF_INSTPREM, as.numeric(BILLFREQ)*COVRPF_INSTPREM)) 
+    
+  tied_agency_ape =  mp %>% 
+    merge(x = ., y = data, by.x = 'AGENT_CODE', by.y = 'AGENT_CODE')
+  
+  # return
+    tied_agency_ape %>% 
+    dplyr::group_by(time_view = strftime(HPRRCVDT, '%Y%m'), PRODUCTCODE) %>%
+    dplyr::summarise(
+      Case = n()
+      ,
+      `Keyed-in APE` = sum(PENDING_APE, na.rm = T)/10^6
+      ,
+      `% Mix` = (sum(PENDING_APE, na.rm = T)/10^6)/(sum(tied_agency_ape$PENDING_APE)/10^6)
+      ,
+      `Issued APE` = sum(ISSUED_APE, na.rm = T)/10^6
+      ) %>% 
+    dplyr::ungroup(.) %>% 
+      merge(x = ., y = prds, by.x='PRODUCTCODE', by.y = 'PRODUCTCODE', all.x = T) %>% 
+      dplyr::mutate(`Product Code` = PRODUCTCODE, `Product Name`=VIETNAMESENAME, `Base Product` = ifelse(PRODUCT_TYPE == 'BASEPRODUCT', 'Yes', 'No'))
+
+  
+}
+
+# 
+# PERSISTENCY -------------------------------------------------------------
+#
+get_persistency_individual <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  # persistency 2Y
+  SQL <- sprintf("
+                SELECT 
+                  DATE as time_view, 
+                  AGENT_CODE AS segment, 
+                  INDIVIDUAL AS value, 
+                  TOTALAPECURRENT_INDI as current_ape, 
+                  TOTALAPEORIGINAL_INDI as original_ape 
+                FROM RAWDATA_Persistency
+                WHERE DATE = '%s'
+                AND INDIVIDUAL IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per2y = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  per2y
+}
+get_persistency_y1_individual <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  # persistency 2Y
+  SQL <- sprintf("
+                SELECT 
+                  DATE as time_view, 
+                  AGENT_CODE AS segment, 
+                  INDIVIDUAL AS value, 
+                  TOTALAPECURRENT_INDI as current_ape, 
+                  TOTALAPEORIGINAL_INDI as original_ape 
+                FROM RAWDATA_Persistency_Y1
+                WHERE DATE = '%s'
+                AND INDIVIDUAL IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per2y = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  per2y
+}
+get_persistency_y2_individual <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  # persistency 2Y
+  SQL <- sprintf("
+                SELECT 
+                  DATE as time_view, 
+                  AGENT_CODE AS segment, 
+                  INDIVIDUAL AS value, 
+                  TOTALAPECURRENT_INDI as current_ape, 
+                  TOTALAPEORIGINAL_INDI as original_ape 
+                FROM RAWDATA_Persistency_Y2
+                WHERE DATE = '%s'
+                AND INDIVIDUAL IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per2y = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  per2y
+}
+get_persistency_office <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  # persistency 2Y
+  SQL <- sprintf("
+                SELECT 
+                  DATE as time_view, 
+                  AGENT_CODE AS segment, 
+                  OFFICE AS value, 
+                  TOTALAPECURRENT_OFFICE as current_ape, 
+                  TOTALAPEORIGINAL_OFFICE as original_ape 
+                FROM RAWDATA_Persistency
+                WHERE DATE = '%s'
+                AND OFFICE IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per2y = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  per2y
+}
+get_persistency_y1_office <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  # persistency Y1
+  SQL <- sprintf("
+                SELECT 
+                  DATE as time_view, 
+                  AGENT_CODE AS segment, 
+                  OFFICE AS value, 
+                  TOTALAPECURRENT_OFFICE as current_ape, 
+                 TOTALAPEORIGINAL_OFFICE as original_ape 
+                FROM RAWDATA_Persistency_Y1
+                WHERE DATE = '%s'
+                AND OFFICE IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per_y1 = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  per_y1
+}
+get_persistency_y2_office <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  # persistency Y2
+  SQL <- sprintf("
+                SELECT 
+                  DATE as time_view, 
+                  AGENT_CODE AS segment, 
+                  OFFICE AS value, 
+                  TOTALAPECURRENT_OFFICE as current_ape, 
+                  TOTALAPEORIGINAL_OFFICE as original_ape 
+                FROM RAWDATA_Persistency_Y2
+                WHERE DATE = '%s'
+                AND OFFICE IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per_y2 = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  per_y2
+}
+get_persistency_region <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  # persistency 2Y
+  SQL <- sprintf("
+                SELECT 
+                  DATE as time_view, 
+                  AGENT_CODE AS segment, 
+                  REGION AS value, 
+                  TOTALAPECURRENT_REGION as current_ape, 
+                  TOTALAPEORIGINAL_REGION as original_ape 
+                FROM RAWDATA_Persistency
+                WHERE DATE = '%s'
+                AND REGION IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per2y = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  per2y
+}
+get_persistency_y1_region <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  # persistency Y1
+  SQL <- sprintf("
+                SELECT 
+                  DATE as time_view, 
+                  AGENT_CODE AS segment, 
+                  REGION AS value, 
+                  TOTALAPECURRENT_REGION as current_ape, 
+                  TOTALAPEORIGINAL_REGION as original_ape 
+                FROM RAWDATA_Persistency_Y1
+                WHERE DATE = '%s'
+                AND REGION IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per_y1 = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  per_y1
+}
+get_persistency_y2_region <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  # persistency Y2
+  SQL <- sprintf("
+                SELECT 
+                  DATE as time_view, 
+                  AGENT_CODE AS segment, 
+                  REGION AS value, 
+                  TOTALAPECURRENT_REGION as current_ape, 
+                  TOTALAPEORIGINAL_REGION as original_ape 
+                FROM RAWDATA_Persistency_Y2
+                WHERE DATE = '%s'
+                AND REGION IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per_y2 = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  per_y2
+}
+
+persistency_UNIT_Y1 <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf(
+    "SELECT DATE AS BSSDT, U.UNIT_CODE, UNIT AS PERSISTENCY_Y1 
+    FROM RAWDATA_Persistency_Y1 P
+    LEFT JOIN RAWDATA_UnitList U ON P.AGENT_CODE = U.AGENT_CODE
+    WHERE DATE = '%s' AND UNIT IS NOT NULL",
+    paste(bssdt, collapse = "','")
+  )
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding = "utf-8")
+  dbClearResult(result)
+  data
+}
+persistency_UNIT_Y2 <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf(
+    "SELECT DATE AS BSSDT, U.UNIT_CODE, UNIT AS PERSISTENCY_Y2 
+    FROM RAWDATA_Persistency_Y2 P
+    LEFT JOIN RAWDATA_UnitList U ON P.AGENT_CODE = U.AGENT_CODE
+    WHERE DATE = '%s' AND UNIT IS NOT NULL",
+    paste(bssdt, collapse = "','")
+  )
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding = "utf-8")
+  dbClearResult(result)
+  data
+}
+persistency_BRANCH_Y1 <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf(
+    "SELECT DATE AS BSSDT, U.UNIT_CODE as BRANCHCD, BRANCH AS PERSISTENCY_Y1 
+    FROM RAWDATA_Persistency_Y1 P
+    LEFT JOIN RAWDATA_UnitList U ON P.AGENT_CODE = U.AGENT_CODE
+    WHERE DATE = '%s' ",
+    paste(bssdt, collapse = "','")
+  )
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding = "utf-8")
+  dbClearResult(result)
+  data
+}
+persistency_BRANCH_Y2 <- function(bssdt, dbfile) {
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf(
+    "SELECT DATE AS BSSDT, U.UNIT_CODE as BRANCHCD, BRANCH AS PERSISTENCY_Y2 
+    FROM RAWDATA_Persistency_Y2 P
+    LEFT JOIN RAWDATA_UnitList U ON P.AGENT_CODE = U.AGENT_CODE
+    WHERE DATE = '%s' ",
+    paste(bssdt, collapse = "','")
+  )
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding = "utf-8")
+  dbClearResult(result)
+  data
+}
+
 #
 # BD ----------------------------------------------------------------------
 #
@@ -3308,6 +6239,298 @@ GA <- function(bssdt, dbfile = 'KPI_PRODUCTION/main_database.db'){
     merge(x=., y=sumape_ytd, by.x=c('OFFICECD'), by.y=c('OFFICECD_APE_YTD'), all.x=T) %>% 
     merge(x=., y=per_y2, by.x=c('OFFICECD'), by.y=c('OFFICECD'), all.x=T) %>% 
     merge(x=., y=per2y, by.x=c('OFFICECD'), by.y=c('OFFICECD'), all.x=T) 
+}
+GA_fyp <- function(bssdt, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf(
+    "
+    SELECT 
+      GA.OFFICECD,
+  		GA.REGION_NAME AS Region, 
+  		GA.OFFICE_NAME AS Office, 
+  		GA.GANAME AS GA_Name, 
+  		GA.AGCODE AS GAD, 
+  		GA.AGNAME AS GAD_Name, 
+  		GA.CONTRACTDT AS Contract, 
+  		GA.EFFROM AS Effective, 
+  		GA.OPENINGDT AS Opening, 
+  		mpa.MonthStart,
+  		mpa.MonthEnd,
+  		mpa.AGENT_DESIGNATION,
+  		mpa.ActiveSP,
+  		mpa.Active
+  	FROM RAWDATA_GATotal GA 
+  	LEFT JOIN RAWDATA_Manpower_ActiveRatio mpa ON GA.OFFICECD = mpa.OFFICECD
+  	WHERE 
+  		mpa.BussinessDate='%s'
+    ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  data = data %>% 
+    dplyr::mutate(Start=if_else(MONTHSTART=='Yes',1,0)) %>% 
+    dplyr::mutate(End=if_else(MONTHEND=='Yes',1,0)) %>% 
+    dplyr::mutate(Add=if_else(MONTHSTART=='No' & MONTHEND=='Yes',1,0)) %>% 
+    dplyr::mutate(AL=if_else(AGENT_DESIGNATION %in% c('UM','BM') & MONTHEND=='Yes',1,0)) %>% 
+    dplyr::mutate(Actv=if_else(ACTIVESP=='Yes',1,0)) %>% 
+    dplyr::mutate(Actv1c=if_else(ACTIVE=='Yes',1,0)) %>% 
+    dplyr::group_by(OFFICECD, Region, Office, GA_Name, GAD, GAD_Name, Contract, Effective, Opening) %>% 
+    dplyr::summarise(Start=sum(Start), End=sum(End), Add=sum(Add), AL=sum(AL), Actv=sum(Actv), Actv1c=sum(Actv1c)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(Ratio=Actv/((Start+End)/2))
+
+  # sum fyp
+  SQL<- sprintf(
+  "
+  SELECT 
+  	GA.OFFICECD, 
+  	kpi.BussinessDate,
+  	pr.BASEPRODUCT,
+  	kpi.FYP
+  FROM RAWDATA_GATotal GA 
+  LEFT JOIN RAWDATA_KPITotal kpi ON GA.OFFICECD = kpi.OFFICECD
+  LEFT JOIN RAWDATA_Product pr ON kpi.PRODUCTCODE = pr.PRUDUCTCODE
+  WHERE kpi.BUSSINESSDATE LIKE '%s'
+  ", strftime(bssdt, '%Y%'))
+  result <- dbSendQuery(my_database$con, SQL)
+  fyp = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  
+  fyp = fyp %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, "%Y%m%d")))
+  sumfyp = fyp %>% 
+    dplyr::group_by(OFFICECD, BUSSINESSDATE = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(FYP=sum(FYP)/10^6) %>% 
+    dplyr::ungroup(.)
+  sumfyp_ytd = fyp %>% 
+    dplyr::group_by(OFFICECD, BUSSINESSDATE = strftime(BUSSINESSDATE, '%Y')) %>% 
+    dplyr::summarise(FYP=sum(FYP)/10^6) 
+  sumfyp = tidyr::spread(sumfyp, BUSSINESSDATE, FYP)
+  sumfyp_ytd = tidyr::spread(sumfyp_ytd, BUSSINESSDATE, FYP)
+  names(sumfyp) = paste(names(sumfyp), 'FYP', sep = "_")
+  names(sumfyp_ytd) = paste(names(sumfyp_ytd), 'FYP_YTD', sep = "_")
+ 
+   # sum casecount
+  SQL<- sprintf(
+    "
+  SELECT 
+  	GA.OFFICECD, 
+  	kpi.BussinessDate,
+  	pr.BASEPRODUCT,
+  	kpi.`CASE`
+  FROM RAWDATA_GATotal GA 
+  LEFT JOIN RAWDATA_KPITotal kpi ON GA.OFFICECD = kpi.OFFICECD
+  LEFT JOIN RAWDATA_Product pr ON kpi.PRODUCTCODE = pr.PRUDUCTCODE
+  WHERE kpi.BUSSINESSDATE LIKE '%s'
+  ", strftime(bssdt, '%Y%m%'))
+  result <- dbSendQuery(my_database$con, SQL)
+  sumcase = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  sumcase = sumcase %>% 
+    # dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, "%Y%m%d"))) %>% 
+    dplyr::mutate(CASECOUNT = if_else(BASEPRODUCT=='Yes', CASE, 0)) %>% 
+    # dplyr::group_by(OFFICECD, BUSSINESSDATE = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::group_by(OFFICECD) %>%
+    dplyr::summarise(CASE_MTD=sum(CASECOUNT))
+  # sumcase = tidyr::spread(sumcase, BUSSINESSDATE, CASECOUNT)
+  # names(sumcase) = paste(names(sumcase), 'CASE', sep = "_")
+  
+  # persistency 2Y
+  SQL <- sprintf("
+                 SELECT AGENT_CODE AS OFFICECD, OFFICE AS PERSISTENCY2Y FROM RAWDATA_Persistency
+                 WHERE DATE = '%s'
+                 AND OFFICE IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per2y = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  # persistency Y2
+  SQL <- sprintf("
+                 SELECT AGENT_CODE AS OFFICECD, OFFICE AS PERSISTENCY_Y2 FROM RAWDATA_Persistency_Y2
+                 WHERE DATE = '%s'
+                 AND OFFICE IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per_y2 = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  
+  # return
+  data %>% 
+    merge(x=., y=sumfyp, by.x=c('OFFICECD'), by.y=c('OFFICECD_FYP'), all.x=T) %>% 
+    merge(x=., y=sumcase, by.x=c('OFFICECD'), by.y=c('OFFICECD'), all.x=T) %>% 
+    merge(x=., y=sumfyp_ytd, by.x=c('OFFICECD'), by.y=c('OFFICECD_FYP_YTD'), all.x=T) %>% 
+    merge(x=., y=per_y2, by.x=c('OFFICECD'), by.y=c('OFFICECD'), all.x=T) %>% 
+    merge(x=., y=per2y, by.x=c('OFFICECD'), by.y=c('OFFICECD'), all.x=T) 
+}
+GA_ryp <- function(bssdt, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  SQL <- sprintf(
+    "
+    SELECT 
+      GA.OFFICECD,
+  		GA.REGION_NAME AS Region, 
+  		GA.OFFICE_NAME AS Office, 
+  		GA.GANAME AS GA_Name, 
+  		GA.AGCODE AS GAD, 
+  		GA.AGNAME AS GAD_Name, 
+  		GA.CONTRACTDT AS Contract, 
+  		GA.EFFROM AS Effective, 
+  		GA.OPENINGDT AS Opening, 
+  		mpa.MonthStart,
+  		mpa.MonthEnd,
+  		mpa.AGENT_DESIGNATION,
+  		mpa.ActiveSP,
+  		mpa.Active
+  	FROM RAWDATA_GATotal GA 
+  	LEFT JOIN RAWDATA_Manpower_ActiveRatio mpa ON GA.OFFICECD = mpa.OFFICECD
+  	WHERE 
+  		mpa.BussinessDate='%s'
+    ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  data = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  data = data %>% 
+    dplyr::mutate(Start=if_else(MONTHSTART=='Yes',1,0)) %>% 
+    dplyr::mutate(End=if_else(MONTHEND=='Yes',1,0)) %>% 
+    dplyr::mutate(Add=if_else(MONTHSTART=='No' & MONTHEND=='Yes',1,0)) %>% 
+    dplyr::mutate(AL=if_else(AGENT_DESIGNATION %in% c('UM','BM') & MONTHEND=='Yes',1,0)) %>% 
+    dplyr::mutate(Actv=if_else(ACTIVESP=='Yes',1,0)) %>% 
+    dplyr::mutate(Actv1c=if_else(ACTIVE=='Yes',1,0)) %>% 
+    dplyr::group_by(OFFICECD, Region, Office, GA_Name, GAD, GAD_Name, Contract, Effective, Opening) %>% 
+    dplyr::summarise(Start=sum(Start), End=sum(End), Add=sum(Add), AL=sum(AL), Actv=sum(Actv), Actv1c=sum(Actv1c)) %>% 
+    dplyr::ungroup(.) %>% 
+    dplyr::mutate(Ratio=Actv/((Start+End)/2))
+
+  # sum ryp
+  SQL<- sprintf(
+  "
+  SELECT 
+  	GA.OFFICECD, 
+  	kpi.BussinessDate,
+  	pr.BASEPRODUCT,
+  	kpi.RYP
+  FROM RAWDATA_GATotal GA 
+  LEFT JOIN RAWDATA_KPITotal kpi ON GA.OFFICECD = kpi.OFFICECD
+  LEFT JOIN RAWDATA_Product pr ON kpi.PRODUCTCODE = pr.PRUDUCTCODE
+  WHERE kpi.BUSSINESSDATE LIKE '%s'
+  ", strftime(bssdt, '%Y%'))
+  result <- dbSendQuery(my_database$con, SQL)
+  ryp = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  
+  ryp = ryp %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, "%Y%m%d")))
+  sumryp = ryp %>% 
+    dplyr::group_by(OFFICECD, BUSSINESSDATE = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(RYP=sum(RYP, na.rm = T)/10^6) %>% 
+    dplyr::ungroup(.)
+  sumryp_ytd = ryp %>% 
+    dplyr::group_by(OFFICECD, BUSSINESSDATE = strftime(BUSSINESSDATE, '%Y')) %>% 
+    dplyr::summarise(RYP=sum(RYP)/10^6) 
+  sumryp = tidyr::spread(sumryp, BUSSINESSDATE, RYP)
+  sumryp_ytd = tidyr::spread(sumryp_ytd, BUSSINESSDATE, RYP)
+  names(sumryp) = paste(names(sumryp), 'RYP', sep = "_")
+  names(sumryp_ytd) = paste(names(sumryp_ytd), 'RYP_YTD', sep = "_")
+ 
+   # sum casecount
+  SQL<- sprintf(
+    "
+  SELECT 
+  	GA.OFFICECD, 
+  	kpi.BussinessDate,
+  	pr.BASEPRODUCT,
+  	kpi.`CASE`
+  FROM RAWDATA_GATotal GA 
+  LEFT JOIN RAWDATA_KPITotal kpi ON GA.OFFICECD = kpi.OFFICECD
+  LEFT JOIN RAWDATA_Product pr ON kpi.PRODUCTCODE = pr.PRUDUCTCODE
+  WHERE kpi.BUSSINESSDATE LIKE '%s'
+  ", strftime(bssdt, '%Y%m%'))
+  result <- dbSendQuery(my_database$con, SQL)
+  sumcase = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  sumcase = sumcase %>% 
+    # dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, "%Y%m%d"))) %>% 
+    dplyr::mutate(CASECOUNT = if_else(BASEPRODUCT=='Yes', CASE, 0)) %>% 
+    # dplyr::group_by(OFFICECD, BUSSINESSDATE = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::group_by(OFFICECD) %>%
+    dplyr::summarise(CASE_MTD=sum(CASECOUNT))
+  # sumcase = tidyr::spread(sumcase, BUSSINESSDATE, CASECOUNT)
+  # names(sumcase) = paste(names(sumcase), 'CASE', sep = "_")
+  
+  # persistency 2Y
+  SQL <- sprintf("
+                 SELECT AGENT_CODE AS OFFICECD, OFFICE AS PERSISTENCY2Y FROM RAWDATA_Persistency
+                 WHERE DATE = '%s'
+                 AND OFFICE IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per2y = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  # persistency Y2
+  SQL <- sprintf("
+                 SELECT AGENT_CODE AS OFFICECD, OFFICE AS PERSISTENCY_Y2 FROM RAWDATA_Persistency_Y2
+                 WHERE DATE = '%s'
+                 AND OFFICE IS NOT NULL
+                 ", strftime(bssdt, "%Y-%m-%d"))
+  result <- dbSendQuery(my_database$con, SQL)
+  per_y2 = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  
+  # return
+  data %>% 
+    merge(x=., y=sumryp, by.x=c('OFFICECD'), by.y=c('OFFICECD_RYP'), all.x=T) %>% 
+    merge(x=., y=sumcase, by.x=c('OFFICECD'), by.y=c('OFFICECD'), all.x=T) %>% 
+    merge(x=., y=sumryp_ytd, by.x=c('OFFICECD'), by.y=c('OFFICECD_RYP_YTD'), all.x=T) %>% 
+    merge(x=., y=per_y2, by.x=c('OFFICECD'), by.y=c('OFFICECD'), all.x=T) %>% 
+    merge(x=., y=per2y, by.x=c('OFFICECD'), by.y=c('OFFICECD'), all.x=T) 
+}
+GA_ape <- function(bssdt, dbfile = 'KPI_PRODUCTION/main_database.db'){
+  if(!inherits(bssdt, "Date")) {
+    message ("date parameter should be a Date type")
+    stop()
+  }
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  # sum ape
+  SQL<- sprintf(
+  "
+  SELECT 
+  	GA.OFFICECD, 
+  	kpi.BussinessDate,
+  	pr.BASEPRODUCT,
+  	kpi.APE
+  FROM RAWDATA_GATotal GA 
+  LEFT JOIN RAWDATA_KPITotal kpi ON GA.OFFICECD = kpi.OFFICECD
+  LEFT JOIN RAWDATA_Product pr ON kpi.PRODUCTCODE = pr.PRUDUCTCODE
+  WHERE kpi.BUSSINESSDATE LIKE '%s'
+  ", strftime(bssdt, '%Y%'))
+  result <- dbSendQuery(my_database$con, SQL)
+  ape = fetch(result, encoding="utf-8")
+  dbClearResult(result)
+  
+  ape = ape %>% 
+    dplyr::mutate(BUSSINESSDATE=as.Date(strptime(BUSSINESSDATE, "%Y%m%d")))
+  sumape = ape %>% 
+    dplyr::group_by(OFFICECD, BUSSINESSDATE = strftime(BUSSINESSDATE, '%Y%m')) %>% 
+    dplyr::summarise(APE=sum(APE)/10^6) %>% 
+    dplyr::ungroup(.)
+  sumape_ytd = ape %>% 
+    dplyr::group_by(OFFICECD, BUSSINESSDATE = strftime(BUSSINESSDATE, '%Y')) %>% 
+    dplyr::summarise(APE=sum(APE)/10^6) 
+  sumape = tidyr::spread(sumape, BUSSINESSDATE, APE)
+  sumape_ytd = tidyr::spread(sumape_ytd, BUSSINESSDATE, APE)
+  names(sumape) = paste(names(sumape), 'APE', sep = "_")
+  names(sumape_ytd) = paste(names(sumape_ytd), 'APE_YTD', sep = "_")
+ 
 }
 
 
@@ -5148,6 +8371,99 @@ fill_excel_column1.4 <- function(df, sheetname, rowNameColIndex, headerRowIndex,
   xlsx::saveWorkbook(wb, result_file)
   start_writing_from_row = start_writing_from_row + nrow(df)
 }
+fill_excel_column1.4_no_fmt <- function(df, sheetname, rowNameColIndex, headerRowIndex, start_writing_from_row, template, result_file) {
+  # each element in the df will be written to the excel sheet 
+  # based on it colname and rowname
+  wb = xlsx::loadWorkbook(template)
+  sheets = xlsx::getSheets(wb)
+  selectedSheet = sheets[[sheetname]]
+  
+  columnNameRows <- xlsx::getRows(selectedSheet, rowIndex = headerRowIndex)  
+  columnNameCells <- xlsx::getCells(columnNameRows)
+  columnNameValues <- lapply(columnNameCells, getCellValue) # extract the cell values
+  
+  for (c in names(columnNameValues)) {
+    cv=columnNameValues[[c]]
+    j = match(cv, colnames(df))
+    if (!is.na(j)) {
+      for (i in seq(1:nrow(df))) {
+        v = df[i, j]
+        
+          # get digits before the dot
+          rowIndex = start_writing_from_row+i-1
+          # get digits following by the dot
+          colIndex = as.numeric(sub(".*\\.", "", c))
+          arow = getRows(selectedSheet, rowIndex = rowIndex)
+          if (length(arow) == 0) {
+            xlsx::createRow(selectedSheet, rowIndex = rowIndex)
+            arow = getRows(selectedSheet, rowIndex = rowIndex)
+          }
+          cells <- getCells(arow, colIndex = colIndex)
+          if (is.null(cells)) {
+            xlsx::createCell(arow, colIndex = colIndex)
+            cells <- getCells(arow, colIndex = colIndex)
+          } 
+            lapply(names(cells), function(x) { 
+              c = cells[[x]]
+              
+              if (!is.na(v)){
+              ### set cell value
+              if (suppressWarnings(!is.na(as.numeric(as.character(v))))) {
+                v = as.numeric(v)
+              } else if (endsWith(as.character(v), '%')) {
+                v = gsub('%', '', v)
+                if (suppressWarnings(!is.na(as.numeric(v)))) {
+                  v = as.numeric(v)/100
+                }
+              } 
+              xlsx::setCellValue(c, v)
+              # c[["Value"]] <- v
+              }
+            })
+          
+        # }
+      }
+    }
+  }
+  # set vay
+  # cell11 <- getCells(getRows(selectedSheet,rowIndex=4),colIndex = 5)[[1]]
+  # xlsx::setCellValue(cell11, "tao day ky")
+  
+  #Exporting data from R to Excel: formulas do not recalculate
+  wb$setForceFormulaRecalculation(T)
+  
+  # autosize column widths for all the columns in the sheet
+  # xlsx::autoSizeColumn(selectedSheet, colIndex=3:(ncol(df)))
+  # xlsx::setColumnWidth(selectedSheet, colIndex=3:ncol(df), colWidth=8)
+  xlsx::saveWorkbook(wb, result_file)
+  start_writing_from_row = start_writing_from_row + nrow(df)
+}
+fill_excel_cell <- function(v, sheetname, rowIndex, colIndex, template, result_file) {
+  # each element in the df will be written to the excel sheet 
+  # based on it colname and rowname
+  wb = xlsx::loadWorkbook(template)
+  sheets = xlsx::getSheets(wb)
+  selectedSheet = sheets[[sheetname]]
+  
+  arow = getRows(selectedSheet, rowIndex = rowIndex)
+  if (length(arow) == 0) {
+    xlsx::createRow(selectedSheet, rowIndex = rowIndex)
+    arow = getRows(selectedSheet, rowIndex = rowIndex)
+  }
+  cells <- getCells(arow, colIndex = colIndex)
+  if (is.null(cells)) {
+    xlsx::createCell(arow, colIndex = colIndex)
+    cells <- getCells(arow, colIndex = colIndex)
+  } 
+  lapply(names(cells), function(x) { 
+    c = cells[[x]]
+    xlsx::setCellValue(c, v)
+  })
+  
+  #Exporting data from R to Excel: formulas do not recalculate
+  wb$setForceFormulaRecalculation(T)
+  xlsx::saveWorkbook(wb, result_file)
+}
 
 sheet_region_kpi <- function(df, workbook, sheetName, row_name_prefixes, offset=1) {
   sheet0 <- xlsx::createSheet(workbook, sheetName=sheetName) # create different sheets
@@ -5363,7 +8679,7 @@ product_mix_calculation <- function(fromdt, bssdt, dbfile = 'KPI_PRODUCTION/main
     products_ape %>% 
       dplyr::filter(PRODUCT_TYPE=='BASEPRODUCT') %>% 
       dplyr::mutate(product_code=PRODUCTCODE, product_name=PRODUCTNAME) %>% 
-      dplyr::select(-PRODUCTCODE, -PRODUCTNAME, -PRODUCT_TYPE, -APE, -TOTAL_APE)
+      dplyr::select(-VIETNAMESENAME, -PRODUCTCODE, -PRODUCTNAME, -PRODUCT_TYPE, -APE, -TOTAL_APE)
     ,
     products_ape %>% dplyr::filter(PRODUCT_TYPE=='RIDER') %>% 
       dplyr::group_by(time_view, PRODUCT_TYPE) %>% 
@@ -5383,7 +8699,7 @@ product_mix_calculation <- function(fromdt, bssdt, dbfile = 'KPI_PRODUCTION/main
     products_ape_in_period %>% 
       dplyr::filter(PRODUCT_TYPE=='BASEPRODUCT') %>% 
       dplyr::mutate(product_code=PRODUCTCODE, product_name=PRODUCTNAME) %>% 
-      dplyr::select(-PRODUCTCODE, -PRODUCTNAME, -PRODUCT_TYPE, -APE, -TOTAL_APE)
+      dplyr::select(-VIETNAMESENAME, -PRODUCTCODE, -PRODUCTNAME, -PRODUCT_TYPE, -APE, -TOTAL_APE)
     ,
     products_ape_in_period %>% dplyr::filter(PRODUCT_TYPE=='RIDER') %>% 
       dplyr::group_by(time_view, PRODUCT_TYPE) %>% 
@@ -5400,6 +8716,7 @@ product_mix_calculation <- function(fromdt, bssdt, dbfile = 'KPI_PRODUCTION/main
       dplyr::mutate(product_code='SME', product_name='')
   )
 }
+
 
 product_mix <- function(criteria='', orderby, addTotalRow=F, dbfile = 'KPI_PRODUCTION/main_database.db') {
   my_database <- src_sqlite(dbfile, create = TRUE)
@@ -5432,8 +8749,20 @@ product_mix <- function(criteria='', orderby, addTotalRow=F, dbfile = 'KPI_PRODU
 }
 # *** ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+get_genlion_final_date <- function(bssdt){
+  bssdt %>% quarters()
+}
 # DATE UTIL ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+generate_last_day_of_quarter <- function(yyyy) {
+  fr <- as.Date(sprintf('%s-01-01', yyyy))
+  to <- as.Date(sprintf('%s-12-31', yyyy))
+  last_day_of_quarters <- seq(from=seq(fr, length=2, by='1 quarter')[2], to=seq(to, length=2, by='1 quarter')[2], by="1 quarter") - 1
+  last_day_of_quarters
+}
 
+generate_last_day_of_q1 <- function(bssdt) {
+  as.Date(cut(bssdt, "quarter")) - 1
+}
 
 generate_last_day_of_month <- function(yyyy) {
   fr <- as.Date(sprintf('%s-01-01', yyyy))
@@ -5448,6 +8777,32 @@ get_last_day_of_m0 <- function(yyyy, mm) {
   dt <- as.Date(sprintf('%s-%s-01', yyyy, mm))
   re <- seq(dt, length=2, by='1 month')-1
   re[2]
+}
+
+get_last_day_of_next_m1 <- function(yyyy, mm) {
+  dt <- as.Date(sprintf('%s-%s-01', yyyy, mm))
+  re <- seq(dt, length=6, by='1 month')-1
+  re[3]
+}
+get_last_day_of_next_m2 <- function(yyyy, mm) {
+  dt <- as.Date(sprintf('%s-%s-01', yyyy, mm))
+  re <- seq(dt, length=6, by='1 month')-1
+  re[4]
+}
+get_last_day_of_next_m3 <- function(yyyy, mm) {
+  dt <- as.Date(sprintf('%s-%s-01', yyyy, mm))
+  re <- seq(dt, length=6, by='1 month')-1
+  re[5]
+}
+get_last_day_of_next_m4 <- function(yyyy, mm) {
+  dt <- as.Date(sprintf('%s-%s-01', yyyy, mm))
+  re <- seq(dt, length=6, by='1 month')-1
+  re[6]
+}
+get_last_day_of_next_m5 <- function(yyyy, mm) {
+  dt <- as.Date(sprintf('%s-%s-01', yyyy, mm))
+  re <- seq(dt, length=7, by='1 month')-1
+  re[7]
 }
 
 get_last_day_of_m1 <- function(yyyy, mm) {
@@ -5484,6 +8839,26 @@ get_last_day_of_m6 <- function(yyyy, mm) {
   dt <- as.Date(sprintf('%s-%s-01', yyyy, mm))
   re <- seq(dt, length=6, by='-1 month')-1
   re[6]
+}
+get_last_day_of_month_x <- function(yyyy, mm, x) {
+  if (x == 0) {
+    get_last_day_of_m0(yyyy, mm)
+  } else {
+    dt <- as.Date(sprintf('%s-%s-01', yyyy, mm))
+    re <- seq(dt, length=x, by='-1 month')-1
+    re[x]
+  }
+}
+get_last_day_of_month_x_v1 <- function(yyyy, mm, x) {
+  if (x == 0) {
+    time_view = get_last_day_of_m0(yyyy, mm)
+    data.frame(time_view, M='M0')
+  } else {
+    dt <- as.Date(sprintf('%s-%s-01', yyyy, mm))
+    re <- seq(dt, length=x, by='-1 month')-1
+    time_view = re[x]
+    data.frame(time_view, M=sprintf('M%s', x))
+  }
 }
 
 count_different_month_between_2days <- function(d1, d2) {
@@ -5572,8 +8947,8 @@ import_agentlist_from_msaccess <- function(BUSSINESSDATE, accessdb="KPI_PRODUCTI
                                                       strftime(as.Date(strptime(BUSSINESSDATE, '%Y%m%d')),'%Y-%m-%d')
       )) # clear data from the table
       dbClearResult(results) # clear result set
-      db_insert_into(con = my_database$con, table = tablename, values = result) # insert data to the table
-      # insert_or_replace_bulk(result, tablename, bulksize = 1000)
+      # db_insert_into(con = my_database$con, table = tablename, values = result) # insert data to the table
+      insert_or_replace_bulk(result, tablename, dbfile, bulksize = 1000)
     }
   }
   close(accessConn) 
@@ -5621,6 +8996,63 @@ import_kpiproduction_msaccess <- function(tablenames=NA, accessdb="KPI_PRODUCTIO
   close(accessConn) 
   dbDisconnect(my_database$con)
 }
+import_kpiproduction_msaccess_drop_then_create_new_table <- function(tablenames=NA, accessdb="KPI_PRODUCTION/KPI_PRODUCTION.accdb", dbfile = 'KPI_PRODUCTION/main_database.db') {
+  # tablenames=c('KPITotal','Manpower_Active Ratio')
+  # accessdb="d:/Data/DA_201711/KPI_PRODUCTION.accdb"
+  accessConn<-odbcConnectAccess2007(accessdb, readOnlyOptimize=T)
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  all_tables <- subset(sqlTables(accessConn), 
+                       TABLE_TYPE %in% c("TABLE", "VIEW"), 
+                       TABLE_NAME) # get all tables' name from the data base
+  all_tables <- dplyr::filter(all_tables, TABLE_NAME %in% ifelse(is.na(tablenames), all_tables$TABLE_NAME, tablenames))
+  
+  for (i in 1:nrow(all_tables)) {
+    tablename <- (all_tables[i,'TABLE_NAME'])
+    print(sprintf('Data copying for %s', tablename))
+    # result <- sqlFetch(accessConn, tablename) # fetch data from tables
+    # thay bang 2 dong ben duoi
+    accessSQL = sprintf("SELECT * from [%s]", tablename)
+    result <- RODBC::sqlQuery(accessConn, accessSQL)
+    
+    result[] <- lapply(result, function(x) if(inherits(x, "POSIXct")) strftime(x, '%Y-%m-%d') else x) # convert all POSIXct columns to string columns
+    
+    fieldnames <- names(result) # get all field names in the result
+    fieldnames <- gsub(' ', '_', fieldnames) # replace all special characters in the fieldnames by '_'
+    fieldnames <- gsub('%', '', fieldnames) # replace all special characters in the fieldnames by '_'
+    fieldnames <- gsub('&', '', fieldnames) # replace all special characters in the fieldnames by '_'
+    names(result) <- toupper(fieldnames) # rename all fields in the result
+    
+    tablename <- gsub(' ', '', tablename) # replace all special characters from the table name 
+    tablename <- gsub('&', '', tablename) # replace all special characters from the table name 
+    tablename <- gsub('-', '', tablename) # replace all special characters from the table name
+    tablename <- gsub('%', '', tablename) # replace all special characters from the table name
+    tablename <- sprintf('RAWDATA_%s', tablename)
+    if (!(tablename %in% dbListTables(my_database$con))) {
+      copy_to(my_database, result, name=tablename, temporary = FALSE)
+    } else {
+      # results <- dbSendQuery(my_database$con, sprintf("delete FROM %s", tablename))
+      # dbClearResult(results)
+      # db_insert_into(con = my_database$con, table = tablename, values = result)
+      results <- dbSendQuery(my_database$con, sprintf("drop table %s", tablename))
+      dbClearResult(results)
+      copy_to(my_database, result, name=tablename, temporary = FALSE)
+    }
+  }
+  close(accessConn) 
+  dbDisconnect(my_database$con)
+}
+
+import_lifeasia_data <- function(folder, dbfile) {
+  library(readr)
+  HPADPF <- read_csv(sprintf("%s//HPADPF.csv", folder))
+  insert_or_replaceall(HPADPF, 'HPADPF', dbfile)
+  CHDRPF <- read_csv(sprintf("%s//CHDRPF.csv", folder))
+  insert_or_replaceall(CHDRPF, 'CHDRPF', dbfile)
+  COVTPF <- read_csv(sprintf("%s//COVTPF.csv", folder))
+  insert_or_replaceall(COVTPF, 'COVTPF', dbfile)
+  COVRPF <- read_csv(sprintf("%s//COVRPF.csv", folder))
+  insert_or_replaceall(COVRPF, 'COVRPF', dbfile)
+}
 
 import_kpiproduction_msaccess_GENLION_REPORT <- function(BUSSINESSDATE, accessdb="KPI_PRODUCTION/KPI_PRODUCTION.accdb", dbfile = 'KPI_PRODUCTION/main_database.db') {
   tablenames='Genlion_Report'
@@ -5658,6 +9090,47 @@ import_kpiproduction_msaccess_GENLION_REPORT <- function(BUSSINESSDATE, accessdb
       copy_to(my_database, result, name=tablename, temporary = FALSE)
     } else {
       results <- dbSendQuery(my_database$con, sprintf("delete FROM %s WHERE BUSSINESSDATE= '%s'", tablename, BUSSINESSDATE))
+      dbClearResult(results)
+      db_insert_into(con = my_database$con, table = tablename, values = result)
+    }
+  }
+  close(accessConn) 
+  dbDisconnect(my_database$con)
+}
+import_kpiproduction_msaccess_Manpower_Active_Ratio_2015_forward <- function(BUSSINESSDATE, accessdb="KPI_PRODUCTION/KPI_PRODUCTION.accdb", dbfile = 'KPI_PRODUCTION/main_database.db') {
+  tablenames='Manpower_Active Ratio'
+  accessConn<-odbcConnectAccess2007(accessdb, readOnlyOptimize=T)
+  my_database <- src_sqlite(dbfile, create = TRUE)
+  all_tables <- subset(sqlTables(accessConn), 
+                       TABLE_TYPE %in% c("TABLE", "VIEW"), 
+                       TABLE_NAME) # get all tables' name from the data base
+  all_tables <- dplyr::filter(all_tables, TABLE_NAME %in% ifelse(is.na(tablenames), all_tables$TABLE_NAME, tablenames))
+  
+  for (i in 1:nrow(all_tables)) {
+    tablename <- (all_tables[i,'TABLE_NAME'])
+    print(sprintf('Data copying for %s', tablename))
+    # result <- sqlFetch(accessConn, tablename) # fetch data from tables
+    # thay bang 2 dong ben duoi
+    accessSQL = sprintf("SELECT * from [%s] WHERE right(BUSSINESSDATE,4)=%s", tablename, BUSSINESSDATE)
+    result <- RODBC::sqlQuery(accessConn, accessSQL)
+    
+    result[] <- lapply(result, function(x) if(inherits(x, "POSIXct")) strftime(x, '%Y-%m-%d') else x) # convert all POSIXct columns to string columns
+    
+    fieldnames <- names(result) # get all field names in the result
+    fieldnames <- gsub(' ', '_', fieldnames) # replace all special characters in the fieldnames by '_'
+    fieldnames <- gsub('%', '', fieldnames) # replace all special characters in the fieldnames by '_'
+    fieldnames <- gsub('&', '', fieldnames) # replace all special characters in the fieldnames by '_'
+    names(result) <- toupper(fieldnames) # rename all fields in the result
+    
+    tablename <- gsub(' ', '', tablename) # replace all special characters from the table name 
+    tablename <- gsub('&', '', tablename) # replace all special characters from the table name 
+    tablename <- gsub('-', '', tablename) # replace all special characters from the table name
+    tablename <- gsub('%', '', tablename) # replace all special characters from the table name
+    tablename <- sprintf('RAWDATA_%s', tablename)
+    if (!(tablename %in% dbListTables(my_database$con))) {
+      copy_to(my_database, result, name=tablename, temporary = FALSE)
+    } else {
+      results <- dbSendQuery(my_database$con, sprintf("delete FROM %s WHERE BUSSINESSDATE LIKE '%s%s'", tablename, BUSSINESSDATE, '%'))
       dbClearResult(results)
       db_insert_into(con = my_database$con, table = tablename, values = result)
     }
@@ -5855,5 +9328,80 @@ RDCOMClient_col_count <- function(RDCOMClient_workbook, str_sheetname) {
   sheet <- RDCOMClient_workbook$Worksheets(str_sheetname)
   used_range = sheet$UsedRange()
   used_range$Columns()$Count()
+}
+
+count_group_by <- function(df, f1 = NA, f2 = NA, f3 = NA, f4 = NA, f5 = NA, f6 = NA, f7 = NA, f8 = NA, f9 = NA, f10 = NA, summarise_field_name){
+  segs =data.frame(
+    segment = c("'COUNTRY'", 'TERRITORY', 'REGIONCD', 'ZONECD', 'OFFICECD', 'TEAMCD'),
+    group_level = c("'COUNTRY'", "'TERRITORY'", "'REGIONCD'", "'ZONECD'", "'OFFICECD'", "'TEAMCD'"),
+    order_idx = c(0, 1, 2, 3, 4, 5)
+  )
+  
+  re = do.call(rbind, apply(segs, 1, function(seg){
+    
+    n1 =  names(segs)[1]
+    b1 = seg[1]
+    
+    n2 =  names(segs)[2]
+    b2 = seg[2]
+    
+    n3 =  names(segs)[3]
+    b3 = seg[3]
+    
+    tem = df %>% dplyr::group_by_(
+      n1 = b1,
+      n2 = b2,
+      n3 = b3,
+      'f1' = ifelse(is.na(f1), "'fx'", f1),
+      'f2' = ifelse(is.na(f2), "'fx'", f2),
+      'f3' = ifelse(is.na(f3), "'fx'", f3),
+      'f4' = ifelse(is.na(f4), "'fx'", f4),
+      'f5' = ifelse(is.na(f5), "'fx'", f5),
+      'f6' = ifelse(is.na(f6), "'fx'", f6),
+      'f7' = ifelse(is.na(f7), "'fx'", f7),
+      'f8' = ifelse(is.na(f8), "'fx'", f8),
+      'f9' = ifelse(is.na(f9), "'fx'", f9),
+      'f10' = ifelse(is.na(f10), "'fx'", f10)
+    ) %>%
+      dplyr::summarise_(v = 'n()') %>%
+      dplyr::ungroup(.)
+    tem[, n1] = tem$n1
+    tem[, n2] = tem$n2
+    tem[, n3] = tem$n3
+    tem %>% dplyr::select(-n1, -n2, -n3)
+  }))
+  
+  re[,summarise_field_name] = re$v
+  if (!is.na(f1)) {
+    re[,f1] = re$f1
+  }
+  if (!is.na(f2)) {
+    re[,f2] = re$f2
+  }
+  if (!is.na(f3)) {
+    re[,f3] = re$f3
+  }
+  if (!is.na(f4)) {
+    re[,f4] = re$f4
+  }
+  if (!is.na(f5)) {
+    re[,f5] = re$f5
+  }
+  if (!is.na(f6)) {
+    re[,f6] = re$f6
+  }
+  if (!is.na(f7)) {
+    re[,f7] = re$f7
+  }
+  if (!is.na(f8)) {
+    re[,f8] = re$f8
+  }
+  if (!is.na(f9)) {
+    re[,f9] = re$f9
+  }
+  if (!is.na(f10)) {
+    re[,f10] = re$f10
+  }
+  re %>% dplyr::select(-v, -f1, -f2, -f3, -f4, -f5, -f6, -f7, -f8, -f9, -f10)
 }
 
