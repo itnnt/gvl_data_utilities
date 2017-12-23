@@ -44,6 +44,7 @@ get_group_persistency <- function(bssdt) {
 # =======
 #   group_persistency %>% tidyr::spread(time_view, value)
 # >>>>>>> origin/master
+
 }
 
 get_segment_persistency <- function(bssdt) {
