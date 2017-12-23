@@ -39,7 +39,7 @@ get_group_persistency <- function(bssdt) {
   ) %>% 
     dplyr::mutate(time_view = strftime(as.Date(strptime(time_view, '%Y-%m-%d')), '%Y%m'))
   
-  group_persistency #%>% tidyr::spread(time_view, value)
+  group_persistency %>% tidyr::spread(time_view, value)
 }
 
 get_segment_persistency <- function(bssdt) {
@@ -69,8 +69,9 @@ get_segment_persistency <- function(bssdt) {
   ) %>% 
     dplyr::mutate(time_view = strftime(as.Date(strptime(time_view, '%Y-%m-%d')), '%Y%m')) %>% 
     dplyr::select( segment, current_ape, original_ape, level, idx, time_view, value) %>% 
-    #tidyr::spread(time_view, value) %>% 
-    dplyr::arrange(idx) 
+    tidyr::spread(time_view, value) %>% 
+    dplyr::arrange(idx) %>% 
+    dplyr::select(-idx)
 }
 
 get_persistency_y1_office(bssdt, dbfile)
