@@ -83,26 +83,8 @@ load_data <- function(bssdt, rowindx) {
   ape = ape_individual_10per_topup_incl(bssdt, dbfile)  
   ape_ytd = ape_individual_10per_topup_incl_fullyear(strftime(bssdt, '%Y'), dbfile)  
   ape_ytd_y1 = ape_individual_10per_topup_incl_fullyear(as.numeric(strftime(bssdt, '%Y'))-1, dbfile)  
-  fyp = fyp_individual_10per_topup_incl(bssdt, dbfile) %>%  
-    merge(x=.,y=territory, by.x='REGIONCD', by.y='REGION_CODE', all.x=T) %>% 
-    merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
-    dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
-    merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
-    dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
-    merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
-    dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
-    merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
-    dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME) 
-  fyp_ytd = fyp_individual_10per_topup_incl_fullyear(strftime(bssdt, '%Y'), dbfile) %>%  
-    merge(x=.,y=territory, by.x='REGIONCD', by.y='REGION_CODE', all.x=T) %>% 
-    merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 
-    dplyr::mutate(TEAMCD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
-    merge(x=.,y=ad, by.x='OFFICECD', by.y='ADCODE', all.x=T) %>% 
-    dplyr::mutate(OFFICECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
-    merge(x=.,y=ad, by.x='ZONECD', by.y='ADCODE', all.x=T) %>% 
-    dplyr::mutate(ZONECD=ADNAME) %>% dplyr::select(-ADNAME) %>% 
-    merge(x=.,y=ad, by.x='REGIONCD', by.y='ADCODE', all.x=T) %>% 
-    dplyr::mutate(REGIONCD=ADNAME) %>% dplyr::select(-ADNAME) 
+  fyp = fyp_individual_10per_topup_incl(bssdt, dbfile)  
+  fyp_ytd = fyp_individual_10per_topup_incl_fullyear(strftime(bssdt, '%Y'), dbfile)  
   case = case_individual(bssdt, dbfile) %>%  
     merge(x=.,y=territory, by.x='REGIONCD', by.y='REGION_CODE', all.x=T) %>% 
     merge(x=.,y=ad, by.x='TEAMCD', by.y='ADCODE', all.x=T) %>% 

@@ -1,6 +1,6 @@
 source('KPI_PRODUCTION/Common functions.R')
 
-excelFile = sprintf("KPI_PRODUCTION/output/Rookie_performance_%s.xlsx", strftime(Sys.time(),'%y%m%d'))
+excelFile = sprintf("d:\\workspace_excel\\GVL\\DOMS\\Rookie performance\\Rookie_performance_%s.xlsx", strftime(Sys.time(),'%Y%m%d'))
 # sheet North -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 df=report_rookie_metric_by_recruited_month(criteria = "where yy>=2016 and value!=0")
@@ -12,7 +12,7 @@ replace_cellvalue2.1(df,
                      sheetname="MetricbyRecruitedMonth",
                      rowNameColIndex = 1,
                      headerRowIndex = 1,
-                     template="KPI_PRODUCTION/output/Rookie performance/Rookie_performance_template.xlsx",
+                     template="d:\\workspace_excel\\GVL\\DOMS\\Rookie performance\\Rookie_performance_template.xlsx",
                      result_file=excelFile)
 
 

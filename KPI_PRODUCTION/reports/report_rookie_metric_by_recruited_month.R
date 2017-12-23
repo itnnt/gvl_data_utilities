@@ -17,7 +17,7 @@ private_add_cols_changed_colnames_and_save <- function(df, kpiname) {
   # df
 }
 
-rookie_mertric = get_Rookie_Metric_by_Recruited_month_v2(as.Date('2017-07-31'))
+rookie_mertric = get_Rookie_Metric_by_Recruited_month_v2(as.Date('2017-11-30'))
 private_add_cols_changed_colnames_and_save(
   dplyr::select(rookie_mertric, time_view=recruit_month, value=new_recruited_agents), 
   'recruited_ag_m0')

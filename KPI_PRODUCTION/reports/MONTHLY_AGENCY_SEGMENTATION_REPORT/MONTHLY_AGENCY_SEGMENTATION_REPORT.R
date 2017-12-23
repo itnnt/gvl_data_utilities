@@ -807,18 +807,30 @@ if(interactive()) {
     result_file = excelFile
   ) 
   
+  group_persistency = do.call(rbind, lapply(generate_last_day_of_month(2017), function(d) {
+    get_group_persistency(d)
+  })
+  )
   
-  group_persistency = rbind(get_segment_persistency(bssdt), get_group_persistency(bssdt))
+  segment_persistency = do.call(rbind, lapply(generate_last_day_of_month(2017), function(d) {
+    get_segment_persistency(d)
+  })
+  )
+  
+  rbind(
+  segment_persistency %>% 
+    dplyr::filter(segment == 'COUNTRY' | level == 'COUNTRY') %>% 
+    dplyr::select(segment, time_view, idx, value) %>% 
+    tidyr::spread(time_view, value) %>% 
+    dplyr::arrange(idx) %>% 
+    dplyr::select(-idx)
+  ,
   group_persistency %>% 
-    dplyr::filter(segment == 'COUNTRY' | level == 'COUNTRY') 
+    dplyr::filter(segment == 'COUNTRY' | level == 'COUNTRY') %>% 
+    dplyr::select(segment, time_view, value) %>% 
+    tidyr::spread(time_view, value)
+  )
   
-  
-  group_persistency %>% 
-    dplyr::filter(segment == 'NORTH' | level == 'NORTH') 
-  
-  group_persistency %>% 
-    dplyr::filter(segment == 'SOUTH' | level == 'SOUTH')
-  # rm(list=ls())
 }
 
 
